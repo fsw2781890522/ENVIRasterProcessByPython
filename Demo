@@ -1,0 +1,182 @@
+import numpy as np
+import os
+import time
+
+import multiprocessing
+import spectral
+from osgeo import gdal
+import pandas as pd
+from pprint import pprint
+
+import spectral.io.envi as e
+import envipyengine
+from envipyengine import Engine
+
+from ENVITasks import *
+from imageprocess import *
+from pathfunc import *
+
+envi = Engine('ENVI')
+envipyengine.config.set('engine', r"D:\\SOFTWARE\\ENVI57\\ENVI57\\IDL89\\bin\\bin.x86_64\\taskengine.exe")
+
+
+def format_time(seconds):
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    return f"{int(h)} h {int(m)} m {int(s)} s"
+
+
+def workflow(fn, out_dir):
+    opath = create_opath(out_dir, get_fn_info(fn).base, steps)
+    uri, sta = Pca.forward(fn, opath['1_PCA'])
+    uri = Denoise.moment_matching(uri, opath['2_mm'])
+    uri = Pca.inverse(uri, opath['3_invPCA'], sta)
+    uri, sta = Pca.forward(uri, opath['4_PCA'])
+    uri = Denoise.lowpass(uri, opath['5_lowpass'])
+    uri = Pca.inverse(uri, opath['6_invPCA'], sta)
+    uri, sta = Pca.forward(uri, opath['7_PCA'])
+
+
+if __name__ == '__main__':
+    root_dir = r'J:\ENVIRasterProcessByPython\test_AHSI'
+    out_dir = r'J:\ENVIRasterProcessByPython\pyDenoise'
+
+    fn_list = get_fn_list(root_dir)
+    steps = ['1_PCA', '2_mm', '3_invPCA', '4_PCA', '5_lowpass', '6_invPCA', '7_PCA']
+
+    for fn in fn_list:
+        start_time = time.time()
+
+        print('Processing ' + fn)
+        workflow(fn, out_dir)
+
+        end_time = time.time()
+        consume = format_time(end_time - start_time)
+        print(f"Workflow consumed time: {consume}")
+
+'''
+    class Workflow:
+
+        def __init__(self):
+            self.consume = 0  # Initialize consume attribute
+
+        def __enter__(self):
+            self.start_time = time.time()
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self.end_time = time.time()
+            self.consume = self.end_time - self.start_time
+            print(f"Workflow consumed time: {self.format_time(self.consume)}")
+
+        @staticmethod
+        def format_time(seconds):
+            m, s = divmod(seconds, 60)
+            h, m = divmod(m, 60)
+            return f"{int(h)} h {int(m)} m {int(s)} s"
+
+        def run(self, fn, out_dir):
+            start_time = time.time()
+
+            opath = create_opath(out_dir, get_fn_info(fn).base, steps)
+            uri, sta = Pca.forward(fn, opath['1_PCA'])
+            uri = Denoise.moment_matching(uri, opath['2_mm'])
+            uri = Pca.inverse(uri, opath['3_invPCA'], sta)
+            uri, sta = Pca.forward(uri, opath['4_PCA'])
+            uri = Denoise.lowpass(uri, opath['5_lowpass'])
+            uri = Pca.inverse(uri, opath['6_invPCA'], sta)
+            uri, sta = Pca.forward(uri, opath['7_PCA'])
+'''
+
+# with multiprocessing.Pool() as pool:
+#     pool.starmap(process_fn, [(fn, out_dir) for fn in fn_list])
+
+# for fn in fn_list:
+#     with Workflow() as workflow:
+#         workflow.run(fn, out_dir)
+#         print(f"Workflow consumed time: {workflow.format_time(workflow.consume)}")
+
+# raster_fn = r"J:\ENVIRasterProcessByPython\test_AHSI\ZY1F_AHSI_E40.85_N23.27_20230904.hdr"
+# o_fn1 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA.hdr"
+# o_fn2 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA_mm.hdr"
+# o_fn3 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA_mm_invPCA.hdr"
+# o_fn4 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA_mm_invPCA_PCA.hdr"
+# o_fn5 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA_mm_invPCA_PCA_lowpass.hdr"
+# o_fn6 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA_mm_invPCA_PCA_lowpass_invPCA.hdr"
+# o_fn7 = r"J:\ENVIRasterProcessByPython\pyDenoise\test_PCA_mm_invPCA_PCA_lowpass_invPCA_PCA.hdr"
+# pca_fn, sta = Pca.forward(raster_fn, o_fn1)
+# mm_fn = Denoise.moment_matching(pca_fn, o_fn2)  # default: width = num of Columns
+# inv_pca_fn = Pca.inverse(mm_fn, o_fn3, sta=sta)
+# pca_fn2, sta2 = Pca.forward(inv_pca_fn, o_fn4)
+# lowpass_fn = Denoise.lowpass(pca_fn2, o_fn5, sigma=1.0)
+# inv_pca_fn2 = Pca.inverse(lowpass_fn, o_fn6, sta=sta2)
+# pca_fn3, sta3 = Pca.forward(inv_pca_fn2, o_fn7)
+
+# raster_fn = r"J:\ENVIRasterProcessByPython\AST_L1T_00303012008050233_20150523030001_75844_pro.dat"
+# PCA_fn = r"J:\ENVIRasterProcessByPython\AST_L1T_00303012008050233_20150523030001_75844_PCA.dat"
+# PCA_raster = PCA_Trans(raster_fn, PCA_fn)
+# print(PCA_raster)
+
+# fn = r"I:\20231207_Altyn\ZY1F_AHSI_processing2\m\ZY1F_AHSI_E88.56_N38.83_20230328_m.hdr"
+# raster = e.open(fn)  # raster: SPy.Image object
+# data = raster.load()  # IDL: data = raster.getData()
+# band6 = raster[:, :, 5]  # IDL: band6 = raster.getData(bands=[5])
+# '''
+# order:
+# raster[nl, ns, nb]
+# '''
+# meta = raster.metadata
+# nl, ns, nb = raster.shape
+# interleave = meta['interleave']
+# pp(meta)
+# print(type(raster), type(data), type(band6))
+
+# attributes = [attr for attr in dir(raster) if
+#               not callable(getattr(raster, attr)) and not attr.startswith("__")]
+# pp(attributes)
+# input_raster = dict(url='<path_to_input_raster>', factory='URLRaster')
+# task = e.task('SpectralIndex')
+# parameters = dict(INPUT_RASTER=input_raster, OUTPUT_RASTER_URI=r'D:\\quac.dat')
+# task.execute(parameters)
+# 读取envi格式高光谱数据文件
+# filepath = r"H:\20231207_Altyn\ZY1F_AHSI_processing2\m\ZY1F_AHSI_E88.56_N38.83_20230328_m.hdr"
+# raster = envi.open(filepath)
+# print(repr(raster))
+# # for attr in vars(raster):
+# #     print(attr)
+# meta = raster.metadata
+# for key, value in meta.items():
+#     print(f"{key}: {value}")
+#
+# raster = None
+# spectral.imshow(raster, (27, 18, 9))
+
+# rows, cols, bands = raster.shape
+# wavelength_units = metadata['wavelength units']  # 获取波长单位
+# file_type = metadata['file type']  # 获取文件类型
+# wl = raster.bands.centers  # 获取波长
+# # # 打印数据的信息
+# print('长', rows, '宽', cols, '波段数', bands, '波段范围', [np.min(wl), np.max(wl)], '波长单位', wavelength_units,
+#       '文件类型', file_type)
+# # print(metadata) #所有头文件信息都保存在metadata中
+#
+# # 尝试将波长单位改为微米，并将波长信息及单位信息重新写入头文件中
+# metadata['wavelength units'] = 'Micrometers'
+# mwl = np.array(wl) / 1000.0
+# metadata['wavelength'] = list(mwl)
+# envi.write_envi_header(filepath, metadata)
+#
+# # 确认修改后的波长信息
+# print(raster.metadata['wavelength'][0])
+#
+# rgb = raster[:, :, [27, 18, 9]]  # 提取真彩色波段数据
+# # 继承原有数据头文件信息中不变部分
+# newmetadata = {key: metadata[key] for key in
+#                ['samples', 'lines', 'file type', 'data type', 'map info', 'file type', 'file type']}
+# newmetadata['bands'] = '3'
+# newmetadata['interleave'] = 'bil'  # 定义数据写入方式
+# newmetadata['wavelengths'] = list(mwl[[27, 18, 9]])  # 定义波长信息
+#
+# print(newmetadata)
+# # 将rgb数据保存为.img格式，可用envi软件打开确认
+# envi.save_image('./data/cuprite_rgb.hdr', rgb, dtype=np.int16, force=True, interleave='bil', metadata=newmetadata)
