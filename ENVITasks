@@ -1,0 +1,119 @@
+import os
+import spectral
+import spectral.io.envi as e
+import envipyengine
+from envipyengine import Engine
+
+envi = Engine('ENVI')
+envipyengine.config.set('engine', r"D:\\SOFTWARE\\ENVI57\\ENVI57\\IDL89\\bin\\bin.x86_64\\taskengine.exe")
+
+
+def AHSI_RadioCali(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
+    print('Applying radiometric calibration...')
+
+    if os.path.exists(OUTPUT_RASTER_URI):
+        return OUTPUT_RASTER_URI
+    else:
+        task = envi.task('RadiometricCalibration')
+        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
+        parameters = dict(
+            INPUT_RASTER=INPUT_RASTER,
+            CALIBRATION_TYPE='Radiance',
+            SCALE_FACTOR=0.1,
+            OUTPUT_DATA_TYPE='Float',
+            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
+        )
+        task.execute(parameters)
+        return OUTPUT_RASTER_URI
+
+def AHSI_ConvertInterleave(INPUT_RASTER_URI, OUTPUT_RASTER_URI, interleave):
+    print('Converting interleave...')
+
+    if os.path.exists(OUTPUT_RASTER_URI):
+        return OUTPUT_RASTER_URI
+    else:
+        task = envi.task('ConvertInterleave')
+        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
+        parameters = dict(
+            INPUT_RASTER=INPUT_RASTER,
+            INTERLEAVE=interleave,
+            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
+        )
+        task.execute(parameters)
+        return OUTPUT_RASTER_URI
+
+def AHSI_FLAASH(INPUT_RASTER_URI, OUTPUT_RASTER_URI, CLOUD_RASTER_URI, WATER_RASTER_URI):
+    print('Applying FLAASH...')
+
+    if os.path.exists(OUTPUT_RASTER_URI):
+        return OUTPUT_RASTER_URI
+    else:
+        meta = e.open(INPUT_RASTER_URI)
+        task = envi.task('FLAASH')
+        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
+        parameters = dict(
+            INPUT_RASTER=INPUT_RASTER,
+            SENSOR_TYPE='Unknown',
+            INPUT_SCALE=1,
+            OUTPUT_SCALE=10000,
+            CALIBRATION_FORMAT='FLAASH',
+            SENSOR_ALTITUDE=float(meta['SENSOR ALTITUDE']),
+            DATE_TIME=meta['ACQUISITION TIME'],
+            SOLAR_AZIMUTH=float(meta['SOLAR AZIMUTH']),
+            SOLAR_ZENITH=float(meta['SOLAR ZENITH']),
+            USE_AEROSOL='Automatic Selection',
+            AEROSOL_SCALE_HT=2,
+            AER_REFERENCE_VALUE=0,
+            CLOUD_RASTER_URI=CLOUD_RASTER_URI,
+            WATER_RASTER_URI=WATER_RASTER_URI,
+            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
+        )
+        task.execute(parameters)
+        return OUTPUT_RASTER_URI
+
+def AHSI_RPCOrtho(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
+    print('Applying RPC orthorectification...')
+
+    if os.path.exists(OUTPUT_RASTER_URI):
+        return OUTPUT_RASTER_URI
+    else:
+        task = envi.task('RPCOrthorectification')
+        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
+        parameters = dict(
+            INPUT_RASTER=INPUT_RASTER,
+            # DEM_RASTER=dem,
+            RESAMPLING='Nearest Neighbor',
+            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
+        )
+        task.execute(parameters)
+        return OUTPUT_RASTER_URI
+
+def PCA_Trans(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
+    print('PCA Transforming...')
+
+    if os.path.exists(OUTPUT_RASTER_URI):
+        return OUTPUT_RASTER_URI
+    else:
+        task = envi.task('ForwardPCATransform')
+        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
+        parameters = dict(
+            INPUT_RASTER=INPUT_RASTER,
+            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
+        )
+        task.execute(parameters)
+        return OUTPUT_RASTER_URI
+
+def MNF_Trans(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
+    print('PCA Transforming...')
+
+    if os.path.exists(OUTPUT_RASTER_URI):
+        return OUTPUT_RASTER_URI
+    else:
+        task = envi.task('ForwardMNFTransform')
+        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
+        parameters = dict(
+            INPUT_RASTER=INPUT_RASTER,
+            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
+        )
+        task.execute(parameters)
+        return OUTPUT_RASTER_URI
