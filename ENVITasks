@@ -1,119 +1,320 @@
 import os
-import spectral
+from pprint import pprint
+from datetime import datetime, timezone, timedelta
 import spectral.io.envi as e
 import envipyengine
 from envipyengine import Engine
+from auxfunc import *
 
 envi = Engine('ENVI')
 envipyengine.config.set('engine', r"D:\\SOFTWARE\\ENVI57\\ENVI57\\IDL89\\bin\\bin.x86_64\\taskengine.exe")
 
 
-def AHSI_RadioCali(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
-    print('Applying radiometric calibration...')
+def ENVITime(acquisition_str):
+    # 将 ACQUISITION 字符串转换为 datetime 对象
+    acquisition_datetime = datetime.fromisoformat(acquisition_str[:-7])  # 去除末尾的毫秒、 'Z'
 
-    if os.path.exists(OUTPUT_RASTER_URI):
-        return OUTPUT_RASTER_URI
-    else:
-        task = envi.task('RadiometricCalibration')
-        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
-        parameters = dict(
-            INPUT_RASTER=INPUT_RASTER,
-            CALIBRATION_TYPE='Radiance',
-            SCALE_FACTOR=0.1,
-            OUTPUT_DATA_TYPE='Float',
-            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
-        )
-        task.execute(parameters)
-        return OUTPUT_RASTER_URI
+    # 将 datetime 对象转换为 UTC 时间
+    acquisition_utc = acquisition_datetime.replace(tzinfo=timezone.utc)
 
-def AHSI_ConvertInterleave(INPUT_RASTER_URI, OUTPUT_RASTER_URI, interleave):
-    print('Converting interleave...')
+    # 计算 UNIX_MILLISECONDS
+    unix_milliseconds = int(acquisition_utc.timestamp() * 1000)
 
-    if os.path.exists(OUTPUT_RASTER_URI):
-        return OUTPUT_RASTER_URI
-    else:
-        task = envi.task('ConvertInterleave')
-        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
-        parameters = dict(
-            INPUT_RASTER=INPUT_RASTER,
-            INTERLEAVE=interleave,
-            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
-        )
-        task.execute(parameters)
-        return OUTPUT_RASTER_URI
+    # 计算 UNIX_SECONDS
+    unix_seconds = int(acquisition_utc.timestamp())
 
-def AHSI_FLAASH(INPUT_RASTER_URI, OUTPUT_RASTER_URI, CLOUD_RASTER_URI, WATER_RASTER_URI):
-    print('Applying FLAASH...')
+    # class ENVITime:
+    #     def __init__(self, acquisition, unix_milliseconds, unix_seconds):
+    #         self.ACQUISITION = acquisition
+    #         self.UNIX_MILLISECONDS = unix_milliseconds
+    #         self.UNIX_SECONDS = unix_seconds
+    #
+    #     def dehydrate(self):
+    #         return {
+    #             'factory': 'Time',
+    #             'acquisition': self.ACQUISITION
+    #         }
 
-    if os.path.exists(OUTPUT_RASTER_URI):
-        return OUTPUT_RASTER_URI
-    else:
-        meta = e.open(INPUT_RASTER_URI)
-        task = envi.task('FLAASH')
-        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
-        parameters = dict(
-            INPUT_RASTER=INPUT_RASTER,
-            SENSOR_TYPE='Unknown',
-            INPUT_SCALE=1,
-            OUTPUT_SCALE=10000,
-            CALIBRATION_FORMAT='FLAASH',
-            SENSOR_ALTITUDE=float(meta['SENSOR ALTITUDE']),
-            DATE_TIME=meta['ACQUISITION TIME'],
-            SOLAR_AZIMUTH=float(meta['SOLAR AZIMUTH']),
-            SOLAR_ZENITH=float(meta['SOLAR ZENITH']),
-            USE_AEROSOL='Automatic Selection',
-            AEROSOL_SCALE_HT=2,
-            AER_REFERENCE_VALUE=0,
-            CLOUD_RASTER_URI=CLOUD_RASTER_URI,
-            WATER_RASTER_URI=WATER_RASTER_URI,
-            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
-        )
-        task.execute(parameters)
-        return OUTPUT_RASTER_URI
+    return dict(
+        acquisition=acquisition_str,
+        unix_milliseconds=unix_milliseconds,
+        unix_seconds=unix_seconds,
+        factory='Time'
+    )
 
-def AHSI_RPCOrtho(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
-    print('Applying RPC orthorectification...')
 
-    if os.path.exists(OUTPUT_RASTER_URI):
-        return OUTPUT_RASTER_URI
-    else:
-        task = envi.task('RPCOrthorectification')
-        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
-        parameters = dict(
-            INPUT_RASTER=INPUT_RASTER,
-            # DEM_RASTER=dem,
-            RESAMPLING='Nearest Neighbor',
-            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
-        )
-        task.execute(parameters)
-        return OUTPUT_RASTER_URI
+class Task:
+    '''
+    Warning: ENVITask methods requires standard ENVIRaster (.dat/.img) as i/o
+        codes:
+            input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+            output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+        are added to each function to prevent from i/o error
 
-def PCA_Trans(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
-    print('PCA Transforming...')
+    Warning: ENVITask methods will be bloody inefficient when processing images in a mobile drive.
+    '''
 
-    if os.path.exists(OUTPUT_RASTER_URI):
-        return OUTPUT_RASTER_URI
-    else:
-        task = envi.task('ForwardPCATransform')
-        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
-        parameters = dict(
-            INPUT_RASTER=INPUT_RASTER,
-            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
-        )
-        task.execute(parameters)
-        return OUTPUT_RASTER_URI
+    @staticmethod
+    def GaussianLowPass(input_raster_uri, output_raster_uri):
+        print('Applying Gaussian low-pass filter...')
 
-def MNF_Trans(INPUT_RASTER_URI, OUTPUT_RASTER_URI):
-    print('PCA Transforming...')
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
 
-    if os.path.exists(OUTPUT_RASTER_URI):
-        return OUTPUT_RASTER_URI
-    else:
-        task = envi.task('ForwardMNFTransform')
-        INPUT_RASTER = dict(url=INPUT_RASTER_URI, factory='URLRaster')
-        parameters = dict(
-            INPUT_RASTER=INPUT_RASTER,
-            OUTPUT_RASTER_URI=OUTPUT_RASTER_URI
-        )
-        task.execute(parameters)
-        return OUTPUT_RASTER_URI
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('GaussianLowPassFilter')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                # ADD_BACK=0.0,
+                KERNEL_SIZE=[3, 3],
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def RadioCali(input_raster_uri, output_raster_uri):
+        print('Applying radiometric calibration...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('RadiometricCalibration')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                CALIBRATION_TYPE='Radiance',
+                SCALE_FACTOR=0.1,
+                OUTPUT_DATA_TYPE='Float',
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def ConvInter(input_raster_uri, output_raster_uri, interleave):
+        print('Converting interleave...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('ConvertInterleave')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                INTERLEAVE=interleave,
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def AHSI_FLAASH(input_raster_uri, output_raster_uri, cloud_raster_uri, water_raster_uri):
+        print('Applying FLAASH...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+        cloud_raster_uri = cloud_raster_uri.replace(get_fn_info(cloud_raster_uri).ext, 'img')
+        water_raster_uri = water_raster_uri.replace(get_fn_info(water_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            # method 'e.open' must have ENVI header file (*.hdr) as input
+            raster = e.open(input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr'))
+            meta = raster.metadata
+            # pprint(meta)
+            task = envi.task('FLAASH')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                SENSOR_TYPE='Unknown',
+                INPUT_SCALE=1,
+                OUTPUT_SCALE=10000,
+                CALIBRATION_FORMAT='FLAASH',
+                SENSOR_ALTITUDE=float(meta['sensor altitude']),
+                DATE_TIME=ENVITime(meta['acquisition time']),
+                SOLAR_AZIMUTH=float(meta['solar azimuth']),
+                SOLAR_ZENITH=float(meta['solar zenith']),
+                USE_AEROSOL='Automatic Selection',
+                AEROSOL_SCALE_HT=2,
+                AER_REFERENCE_VALUE=0,
+                CLOUD_RASTER_URI=cloud_raster_uri,
+                WATER_RASTER_URI=water_raster_uri,
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def ASTER_FLAASH(input_raster_uri, output_raster_uri, cloud_raster_uri, water_raster_uri):
+        print('Applying FLAASH...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            meta = e.open(input_raster_uri)
+            task = envi.task('FLAASH')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                SENSOR_TYPE='Unknown',
+                INPUT_SCALE=1,
+                OUTPUT_SCALE=10000,
+                CALIBRATION_FORMAT='FLAASH',
+                SENSOR_ALTITUDE=705.0,
+                DATE_TIME=ENVITime(meta['acquisition time']),
+                # SOLAR_AZIMUTH=float(meta['SOLAR AZIMUTH']),
+                # SOLAR_ZENITH=float(meta['SOLAR ZENITH']),
+                USE_AEROSOL='Automatic Selection',
+                AEROSOL_SCALE_HT=2,
+                AER_REFERENCE_VALUE=0,
+                CLOUD_RASTER_URI=cloud_raster_uri,
+                WATER_RASTER_URI=water_raster_uri,
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def ASTER_TIR_AtmosCor(input_raster_uri, output_raster_uri):
+        print('Applying TIR atomospheric correction...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            meta = e.open(input_raster_uri)
+            task = envi.task('FLAASH')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                DATA_SCALE=1.0,
+                FITTING_TECHNIQUE='Normalized Regression',
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def AHSI_RPCOrtho(input_raster_uri, output_raster_uri, dem_fn=None):
+        print('Applying RPC orthorectification...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            if dem_fn is None:
+                dem_fn = r"D:\SOFTWARE\ENVI57\ENVI57\data\GMTED2010.jp2"
+            task = envi.task('RPCOrthorectification')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            dem_raster = dict(url=dem_fn, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                DEM_RASTER=dem_raster,
+                RESAMPLING='Nearest Neighbor',
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def PCA_Trans(input_raster_uri, output_raster_uri):
+        print('PCA Transforming...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('ForwardPCATransform')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def MNF_Trans(input_raster_uri, output_raster_uri):
+        print('PCA Transforming...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('ForwardMNFTransform')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+
+'''
+# codes for learning and practice, ignore them
+
+def openRaster(uri):
+    raster = e.open(uri)
+    data = raster.load()
+    meta = raster.metadata
+    nRows, nColumns, nBands = raster.shape
+    time = meta['acquisition time']
+    interleave = meta['interleave']
+    return ENVIRaster(
+        raster=raster, data=data, uri=uri, metadata=meta, interleave=interleave,
+        nRows=nRows, nColumns=nColumns, nBands=nBands, time=time
+    )
+
+
+class ENVIRaster:
+
+    def __init__(
+            self, raster=None, data=None, uri=None, metadata=None, interleave=None,
+            nRows=None, nColumns=None, nBands=None, time=None
+    ):
+        self.raster = raster
+        self.data = data
+        self.uri = uri
+        self.metadata = metadata
+        self.interleave = interleave
+        self.nRows = nRows
+        self.nColumns = nColumns
+        self.nBands = nBands
+        self.time = time
+
+    def getData(self, bands=None):
+        if bands is None:
+            band_data = self.data
+        elif (len(bands) == 1):
+            band_data = self.raster.read_band(bands[0])
+        else:
+            band_data = self.raster.read_bands(bands)
+
+        return band_data
+
+    def save(self, uri):
+        pass
+'''
