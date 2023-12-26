@@ -12,47 +12,57 @@ import spectral.io.envi as e
 import envipyengine
 from envipyengine import Engine
 
-from ENVITasks import *
+# py files new written
+from ENVI import Task
 from imageprocess import *
-from pathfunc import *
-
-envi = Engine('ENVI')
-envipyengine.config.set('engine', r"D:\\SOFTWARE\\ENVI57\\ENVI57\\IDL89\\bin\\bin.x86_64\\taskengine.exe")
+from auxfunc import *
 
 
-def format_time(seconds):
-    m, s = divmod(seconds, 60)
-    h, m = divmod(m, 60)
-    return f"{int(h)} h {int(m)} m {int(s)} s"
+def denoise(fn, out_dir, steps):
+    opath = create_opath(fn, out_dir, steps)
+    sta = Pca.forward(fn, opath['1_PCA'])
+    Denoise.moment_matching(opath['1_PCA'], opath['2_mm'])
+    Pca.inverse(opath['2_mm'], opath['3_invPCA'], sta)
+    sta = Pca.forward(opath['3_invPCA'], opath['4_PCA'])
+    Task.GaussianLowPass(opath['4_PCA'], opath['5_lowpass'])
+    Pca.inverse(opath['5_lowpass'], opath['6_invPCA'], sta)
+    sta = Pca.forward(opath['6_invPCA'], opath['7_PCA'])
 
 
-def workflow(fn, out_dir):
-    opath = create_opath(out_dir, get_fn_info(fn).base, steps)
-    uri, sta = Pca.forward(fn, opath['1_PCA'])
-    uri = Denoise.moment_matching(uri, opath['2_mm'])
-    uri = Pca.inverse(uri, opath['3_invPCA'], sta)
-    uri, sta = Pca.forward(uri, opath['4_PCA'])
-    uri = Denoise.lowpass(uri, opath['5_lowpass'])
-    uri = Pca.inverse(uri, opath['6_invPCA'], sta)
-    uri, sta = Pca.forward(uri, opath['7_PCA'])
+def preprocess(fn, out_dir, steps):
+    opath = create_opath(fn, out_dir, steps)
+    # Task.RadioCali(fn, opath['rad'])
+    # Task.ConvInter(opath['rad'], opath['bil'], 'bil')
+    '''
+    Task.RadioCali() and Task.ConvInter() has been replaced by Preprocess.RadioCali_ConvInter()
+    '''
+    Preprocess.RadioCali_ConvInter(fn, opath['rad'], scale=0.1, dest_interleave='bil')
+    Task.AHSI_FLAASH(opath['rad'], opath['fla'], opath['cloud'], opath['water'])
+    Task.AHSI_RPCOrtho(opath['fla'], opath['ortho'])
 
 
 if __name__ == '__main__':
     root_dir = r'J:\ENVIRasterProcessByPython\test_AHSI'
-    out_dir = r'J:\ENVIRasterProcessByPython\pyDenoise'
+    out_dir = r'J:\ENVIRasterProcessByPython\pyProcess2'
 
-    fn_list = get_fn_list(root_dir)
-    steps = ['1_PCA', '2_mm', '3_invPCA', '4_PCA', '5_lowpass', '6_invPCA', '7_PCA']
+    fn_list = file_search(root_dir, ext='hdr', recursive=False)
+    # denoise_steps = serial(['PCA', 'mm', 'invPCA', 'PCA', 'lowpass', 'invPCA', 'PCA'])
+    # print(denoise_steps)
+    preprocess_steps = ['rad', 'fla', 'cloud', 'water', 'ortho']
 
     for fn in fn_list:
         start_time = time.time()
 
         print('Processing ' + fn)
-        workflow(fn, out_dir)
+        preprocess(fn, out_dir, preprocess_steps)
+        # denoise(fn, out_dir, denoise_steps)
 
         end_time = time.time()
         consume = format_time(end_time - start_time)
         print(f"Workflow consumed time: {consume}")
+
+
+# Following codes are for learning and practice, ignore them
 
 '''
     class Workflow:
