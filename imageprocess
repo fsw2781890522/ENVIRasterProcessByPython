@@ -4,9 +4,19 @@ import spectral.io.envi as e
 from spectral import principal_components
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
+from pprint import pprint
 
 
 def cal_stats(window):
+    '''
+    :param window: a sliding 2D-Array, same nRows as image, assigned nColumns by user(default: same nColumns as image)
+        extracted from a single band of an image
+    :return: an object with attributes miu_ref, sigma_ref, miu, sigma
+    miu_ref: a single number. the mean value of total window
+    sigma_ref: a single number. the std value of total window
+    miu: an array which records mean values of each column in window
+    sigma: an array which records std values of each column in window
+    '''
     miu_sum = 0.0
     sigma_sum = 0.0
     miu = []
@@ -16,8 +26,11 @@ def cal_stats(window):
         column = window[:, j]
 
         ht, locations = np.histogram(column, bins=200)
-        ht_acc = np.cumsum(ht) / np.prod(column.shape)  # get cumulative frequency
-        # note: ht, locations = np.histogram(column, bins=200, density=true) easily cause error
+        ht_acc = np.cumsum(ht) / np.prod(column.shape)
+        '''
+        ht_acc: accumulative frequency of histogram
+        note: ht, locations = np.histogram(column, bins=200, density=true) easily cause error
+        '''
         w1 = np.where(ht_acc >= 0.99)
         w2 = np.where(ht_acc >= 0.01)
         max_val = locations[w1[0][0]]
@@ -33,36 +46,48 @@ def cal_stats(window):
     miu_ref = miu_sum / float(window.shape[1])
     sigma_ref = sigma_sum / float(window.shape[1])
 
-    stats = {'mean_ref': miu_ref, 'std_ref': sigma_ref, 'mean': miu, 'std': sigma}
+    # 构建stats对象
+    class Stats:
+        def __init__(self, miu_ref, sigma_ref, miu, sigma):
+            self.miu_ref = miu_ref
+            self.sigma_ref = sigma_ref
+            self.miu = miu
+            self.sigma = sigma
 
-    return stats
+    # 返回stats对象
+    return Stats(miu_ref, sigma_ref, miu, sigma)
+
+    # stats = {'mean_ref': miu_ref, 'std_ref': sigma_ref, 'mean': miu, 'std': sigma}
+    # return stats
 
 
 def match(arr, width):
+    '''
+    To moment match a single band in an image.
+    :param arr: a 2D-array. a single band data
+    :param width: the width a sliding window in which moment match is applied
+    :return: a moment matched 2D-array as a processed single band
+    '''
     nl, ns = arr.shape
-    # radius = (width - 1) // 2
-
     result_arr = arr
 
     for i in range(ns - width + 1):
         window = arr[:, i: i + width]
         stats = cal_stats(window)
-        miu_ref = stats['mean_ref']
-        sigma_ref = stats['std_ref']
-        miu_vals = stats['mean']
-        sigma_vals = stats['std']
-        # print(miu_ref, sigma_ref)
+        miu_ref = stats.miu_ref
+        sigma_ref = stats.sigma_ref
+        miu_vals = stats.miu
+        sigma_vals = stats.sigma
 
         for j in range(window.shape[1]):
             # check if sigma_vals[j] is zero to avoid divide by zero error
             if sigma_vals[j] != 0:
                 gain = sigma_ref / sigma_vals[j]
                 offset = miu_ref - (gain * miu_vals[j])
-                # print('gain: ', gain, 'offset: ', offset)
+                # prevent from extreme coefficient
                 if gain <= 5:
                     window[:, j] = gain * window[:, j] + offset
 
-        # arr[:, i - radius:i + radius + 1] = window
         result_arr[:, i: i + width] = window
 
     return result_arr
@@ -75,7 +100,7 @@ class Denoise:
         print('Moment matching...')
 
         if os.path.exists(output_raster_uri):
-            return output_raster_uri
+            print(output_raster_uri, 'already exists')
         else:
             input_raster = e.open(input_raster_uri)
             meta = input_raster.metadata
@@ -92,14 +117,18 @@ class Denoise:
                 matched_data[:, :, band] = match(data, width)
 
             e.save_image(output_raster_uri, matched_data, metadata=meta, dtype=np.float32, interleave=interleave)
-            return output_raster_uri
+            print('Done')
 
     @staticmethod
     def lowpass(input_raster_uri, output_raster_uri, sigma=None):
+        '''
+        Warning: gaussian_filter method from scipy.ndimage may cause a fuzzy result.
+        Replaced by GaussianLowPass method from ENVItask in the main procedure
+        '''
         print('Applying lowpass filter...')
 
         if os.path.exists(output_raster_uri):
-            return output_raster_uri
+            print(output_raster_uri, 'already exists')
         else:
             input_raster = e.open(input_raster_uri)
             meta = input_raster.metadata
@@ -116,16 +145,56 @@ class Denoise:
                 filtered_data[:, :, band] = gaussian_filter(data, sigma)
 
             e.save_image(output_raster_uri, filtered_data, metadata=meta, dtype=np.float32, interleave=interleave)
-            return output_raster_uri
+            print('Done')
+
+
+class Preprocess:
+
+    @staticmethod
+    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=None, dest_interleave=None):
+        '''
+        :param scale: scale factor in radiometric calibration
+        :param dest_interleave: interleave to save as. a string 'bsq', 'bil' or 'bip'
+        '''
+
+        if scale is None:
+            scale = 0.1
+
+        if dest_interleave is None:
+            dest_interleave = 'bil'
+
+        print('Applying radiometric calibration...')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            input_raster = e.open(input_raster_uri)
+            # data = np.float32(input_raster.load())
+            meta = input_raster.metadata
+            interleave = meta['interleave']
+            gain = meta['data gain values']
+            offset = meta['data offset values']
+            nl, ns, nb = input_raster.shape
+
+            new_data = np.zeros((nl, ns, nb), dtype=np.float32)
+            for i in tqdm(range(nb)):
+                new_data[:, :, i] = scale * (np.float32(gain[i]) * np.float32(input_raster.read_band(i)) + np.float32(offset[i]))
+
+            meta.pop('data gain values')
+            meta.pop('data offset values')
+
+            print(f'Saving as {dest_interleave}...')
+            e.save_image(output_raster_uri, new_data, metadata=meta, dtype=np.float32, interleave=dest_interleave)
+            print('Done')
 
 
 class Pca:
     @staticmethod
     def forward(input_raster_uri, output_raster_uri):
-        print('Applying PCA transformation by spy...')
+        print('Applying PCA transformation...')
 
         if os.path.exists(output_raster_uri):
-            return output_raster_uri
+            print(output_raster_uri, 'already exists')
         else:
             input_raster = e.open(input_raster_uri)
             data = np.float32(input_raster.load())
@@ -140,23 +209,26 @@ class Pca:
             pca_data = sta.transform(data)
 
             e.save_image(output_raster_uri, pca_data, metadata=meta, dtype=np.float32, interleave=interleave)
-            return output_raster_uri, sta
+            print('Done')
+            return sta
 
     @staticmethod
-    def inverse(input_raster_uri, output_raster_uri, sta):
+    def inverse(input_raster_uri, output_raster_uri, sta=None):
         print('Applying inverse-PCA transformation...')
 
         if os.path.exists(output_raster_uri):
-            return output_raster_uri
+            print(output_raster_uri, 'already exists')
         else:
-            input_raster = e.open(input_raster_uri)
-            pca_data = np.float32(input_raster.load())
-            meta = input_raster.metadata
-            interleave = meta['interleave']
-            # nl, ns, nb = input_raster.shape
-            # 逆变换，将主成分数据乘以主成分矩阵的转置，并加上均值
-            inverse_transformed_data = np.dot(pca_data, sta.eigenvectors.T) + sta.mean
+            if sta is None:
+                print('Statistics missed. Forward PCA needs to be redone to get info of transformation')
+            else:
+                input_raster = e.open(input_raster_uri)
+                pca_data = np.float32(input_raster.load())
+                meta = input_raster.metadata
+                interleave = meta['interleave']
+                # 逆变换，将主成分数据乘以主成分矩阵的转置，并加上均值
+                inverse_transformed_data = np.dot(pca_data, sta.eigenvectors.T) + sta.mean
 
-            e.save_image(output_raster_uri, inverse_transformed_data, metadata=meta, dtype=np.float32,
-                         interleave=interleave)
-            return output_raster_uri
+                e.save_image(output_raster_uri, inverse_transformed_data, metadata=meta, dtype=np.float32,
+                             interleave=interleave)
+                print('Done')
