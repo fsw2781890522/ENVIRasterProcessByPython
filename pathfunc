@@ -1,22 +1,57 @@
 import os
 import fnmatch
 
-def get_fn_info(fn):
-    # 使用os.path模块获取目录、基本名称和扩展名
-    dir_name, base_name = os.path.split(fn)
-    base_name, ext = os.path.splitext(base_name)
 
-    # 构建fn_info对象
+def format_time(seconds):
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    return f"{int(h)} h {int(m)} m {int(s)} s"
+
+
+def serial(steps):
+    '''
+    :param steps: a string list of each procedure ['xxx', 'xxx', ...]
+    :return: a numbered string list ['1_xxx', '2_xxx', ...]
+    '''
+    return [f'{i + 1}_{step}' for i, step in enumerate(steps)]
+
+
+def get_fn_info(fn):
+    '''
+    :param fn: a filename string with absolute path
+    :return: an object with attributes fn, dir, base, ext
+    '''
+    fn = str(fn)
+    # 使用os.path模块获取目录、基本名称和扩展名
+    dir = os.path.dirname(fn)
+    basename = os.path.basename(fn)
+    # basename, ext = os.path.splitext(basename)
+
+    # Split the filename based on '.'
+    parts = basename.split('.')
+
+    # Extract directory, base name, and extension
+    base = '.'.join(parts[:-1])  # Join all parts except the last one
+    ext = parts[-1] if len(parts) > 1 else ''
+
     class FileInfo:
-        def __init__(self, dir, base, ext):
+        def __init__(self, fn, dir, base, ext):
+            self.fn = fn
             self.dir = dir
             self.base = base
             self.ext = ext
 
-    # 返回fn_info对象
-    return FileInfo(dir_name, base_name, ext)
+    return FileInfo(fn, dir, base, ext)
 
-def create_opath(out_dir, basename, steps):
+
+def create_opath(fn, out_dir, steps, ext=None):
+    '''
+    :param out_dir: output directory
+    :param fn: processed filename. to help generating output filename
+    :param steps: procedure list. to help generating output folder of each step
+    :param ext: extension of output filename. default 'hdr'
+    :return: a dictionary. kay: step, value: output filename with absolute path
+    '''
     result_paths = {}
 
     for step in steps:
@@ -27,8 +62,11 @@ def create_opath(out_dir, basename, steps):
             os.makedirs(step_dir)
 
         # 生成输出文件路径
-        basename = get_fn_info(basename).base
-        filename = f"{basename}_{step}.hdr"
+        if ext is None:
+            ext = 'hdr'
+
+        basename = get_fn_info(fn).base
+        filename = f"{basename}_{step}.{ext}"
         output_path = os.path.join(step_dir, filename)
 
         # 将结果添加到字典
@@ -36,7 +74,11 @@ def create_opath(out_dir, basename, steps):
 
     return result_paths
 
+
 def find_xml_files(root_dir):
+    '''
+    This function has been eliminated
+    '''
     # 初始化一个列表来存储找到的文件名
     xml_files = []
 
@@ -52,21 +94,38 @@ def find_xml_files(root_dir):
     # 返回找到的 XML 文件名列表
     return xml_files
 
-def get_fn_list(root_dir):
-    # 使用 fnmatch 模块匹配文件
-    files = [os.path.join(root_dir, f) for f in os.listdir(root_dir) if os.path.isfile(os.path.join(root_dir, f))
-             # and (fnmatch.fnmatch(f, '*.dat') or fnmatch.fnmatch(f, '*.img'))]
-             and (fnmatch.fnmatch(f, '*.hdr'))]
 
+def file_search(root_dir, ext=None, recursive=False):
+    '''
+    :param root_dir: root directory for search
+    :param ext: extension of target file type. default 'hdr'
+    :param recursive: set True or False to decide if search recursively
+    :return: a filename list with absolute path
+    '''
+    if ext is None:
+        ext = 'hdr'
+
+    if recursive:
+        fn_list = []
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            for filename in filenames:
+                file_path = os.path.join(dirpath, filename)
+                if filename.lower().endswith('.' + ext):
+                    # 添加符合条件的文件名到结果列表
+                    fn_list.append(file_path)
+    else:
+        # 使用 fnmatch 模块匹配文件
+        fn_list = [os.path.join(root_dir, f) for f in os.listdir(root_dir) if os.path.isfile(os.path.join(root_dir, f))
+                   # and (fnmatch.fnmatch(f, '*.dat') or fnmatch.fnmatch(f, '*.img'))]
+                   and (fnmatch.fnmatch(f, f'*.{ext}'))]
     # xml_files = find_xml_files(root_dir)
     # fn_list = files + xml_files
 
-    fn_list = files
+    # fn_list = files
 
     if fn_list:
         return fn_list
     else:
         # print('No standard ENVIRaster[*.dat/*.img] or [*.xml] file of China Satellites found.')
-        print('No standard ENVIRaster header[*.hdr] found.')
+        print(f'No {ext} file found.')
         return []
-
