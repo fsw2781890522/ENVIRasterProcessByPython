@@ -1,0 +1,109 @@
+import os
+import time
+import pandas as pd
+import spectral.io.envi as e
+from pprint import pprint
+
+from ENVI import Task
+from imageprocess import *
+from auxfunc import *
+
+if __name__ == '__main__':
+    root_dir = r'I:\AGRS\20231120_ASTER_group1\ASTER_preprocessed'
+    work_dir = r'J:\20240103_Saudi_Group1_ASTER\PyProcessing'
+    result_dir = r'J:\20240103_Saudi_Group1_ASTER\PyPreprocessed'
+    MNF_dir = r'J:\20240103_Saudi_Group1_ASTER\MNF'
+
+    if os.path.exists(result_dir) is False:
+        os.makedirs(result_dir)
+
+    csv_fn = r"J:\20240103_Saudi_Group1_ASTER\selected.csv"
+
+    false_list = []
+    time_list = []
+    file_list = []
+    no_exist_list = []
+
+    steps = ['excision', 'rad', ['VNSW_BIL', 'TIR_BIL'], ['fla', 'cloud', 'water', 'cor'], 'stack', 'rmEdge']
+    '''
+    step1 'excision': Preprocess.ASTER_EdgeExcision
+    step2 'rad': Preprocess.RadioCali_ConvInter
+    step3 'VNSW_BIL', 'TIR_BIL': Preprocess.saveSelectedBands
+    step4: 'fla', 'cloud', 'water', 'cor': Task.ASTER_FLAASH, Task.ASTER_TIR_AtmosCor
+    step5: 'stack': Task.layerStack
+    step6: 'rmEdge': Task.removeEdge
+    '''
+
+    # fn_list = get_fn_list(r'J:\20231207_Altyn\ASTER_L1T', ext='hdf')
+    fn_list = get_fn_list(root_dir, ext='hdr', csv_fn=csv_fn)
+
+    for idx, fn in enumerate(fn_list, start=1):
+        print(f'Processing {get_fn_info(fn).base} | {idx}/{len(fn_list)} ...')
+        input_raster_uri = fn
+        basename = get_fn_info(fn).base
+        opath = create_opath(input_raster_uri, work_dir, steps)
+        result_fn = os.path.join(result_dir, f'{basename}.img')
+        MNF_fn = os.path.join(MNF_dir, f'{basename}_MNF.img')
+
+        if os.path.exists(result_fn):
+            continue
+        else:
+            if os.path.exists(input_raster_uri) is False:
+                print(f'{input_raster_uri} does not exist')
+                no_exist_list.append(basename)
+            else:
+                input_raster = e.open(input_raster_uri)
+                # meta, bands = read_hdf(input_raster_uri)
+                # print(input_raster)
+                meta = input_raster.metadata
+                interleave = meta['interleave']
+                nl, ns, nb = input_raster.shape
+
+                if nb < 14:
+                    print(f'Incomplete Data ({nb} bands)')
+                    false_list.append(basename)
+                else:
+                    # if 'data gain values' not in meta or 'data offset values' not in meta:
+                    #     print('Incomplete metadata (Gain or Offset value missed)')
+                    #     false_list.append(basename)
+                    # else:
+                    import time
+                    import spectral.io.envi as e
+
+                    start_time = time.time()
+
+                    time_list.append(meta['acquisition time'])
+                    file_list.append(basename)
+
+                    # Preprocess.ASTER_EdgeExcision(input_raster_uri, opath['excision'])
+                    #
+                    # Preprocess.RadioCali_ConvInter(input_raster_uri, opath['rad'], out_interleave='bil')
+                    # Preprocess.saveSelectedBands(opath['rad'], opath['VNSW_BIL'], bands=range(9),
+                    #                              out_interleave='bil')
+                    # Preprocess.saveSelectedBands(opath['rad'], opath['TIR_BIL'], bands=range(9, 14),
+                    #                              out_interleave='bil')
+                    #
+                    # Task.ASTER_FLAASH(opath['VNSW_BIL'], opath['fla'], opath['cloud'], opath['water'])
+                    # Task.ASTER_TIR_AtmosCor(opath['TIR_BIL'], opath['cor'])
+                    #
+                    # Task.layerStack([opath['fla'], opath['cor']], opath['stack'])
+
+                    # Task.removeEdge(opath['stack'], opath['rmEdge'], pixels=100)
+                    Task.removeEdge(fn, opath['rmEdge'], pixels=100)
+                    Preprocess.ASTER_EdgeExcision(opath['rmEdge'], result_fn)
+
+                    # Add time attr to metadata (time lost in Task.removeEdge)
+                    result_meta_fn = result_fn.replace(get_fn_info(result_fn).ext, 'hdr')
+                    result_meta = e.open(result_meta_fn).metadata
+                    result_meta['acquisition time'] = meta['acquisition time']
+                    # pprint(result_meta)
+                    e.write_envi_header(result_meta_fn, result_meta)
+
+                    end_time = time.time()
+                    consume = format_time(end_time - start_time)
+                    print(f"Workflow consumed time: {consume}")
+
+    if false_list:
+        pprint(false_list)
+    if no_exist_list:
+        pprint(no_exist_list)
