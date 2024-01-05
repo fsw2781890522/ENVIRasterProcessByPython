@@ -1,10 +1,53 @@
 import os
 import numpy as np
 import spectral.io.envi as e
+import h5py
+from pyhdf.SD import SD
 from spectral import principal_components
+from osgeo import gdal
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 from pprint import pprint
+
+from auxfunc import *
+
+
+def read_hdf(hdf_file_path):
+    # 打开HDF文件
+    hdf_file = SD(hdf_file_path)
+    pprint(hdf_file.attributes())
+
+    # 获取文件的元数据
+    metadata = hdf_file.attributes()
+
+    # 打印元数据字典
+    # print("Metadata:")
+    # for key, value in metadata.items():
+    #     print(f"{key}: {value}")
+
+    # 获取数据集名称列表
+    datasets = hdf_file.datasets()
+    datasets_dic = hdf_file.datasets()
+    for idx, sds in enumerate(datasets_dic.keys()):
+        print(idx, sds)
+    # print("\nDatasets:")
+    # for dataset_name in datasets:
+    #     print(dataset_name)
+
+    # 选择一个数据集（这里假设选择第一个数据集）
+    selected_dataset_name = datasets[0]
+    selected_dataset = hdf_file.select(selected_dataset_name)
+
+    # 读取数据集的数组
+    data_array = selected_dataset.get()
+
+    # 打印数组的形状
+    print("\nData Array Shape:", data_array.shape)
+
+    # 关闭HDF文件
+    hdf_file.end()
+
+    return metadata, data_array
 
 
 def cal_stats(window):
@@ -96,7 +139,18 @@ def match(arr, width):
 class Denoise:
 
     @staticmethod
-    def moment_matching(input_raster_uri, output_raster_uri, width=None):
+    def moment_matching(input_raster_uri, output_raster_uri, width=None, save=True):
+        '''
+        :param input_raster_uri:
+        :param output_raster_uri:
+        :param width:
+        :param save: True: save result to local; False: output to memory only
+        :return:
+        '''
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
         print('Moment matching...')
 
         if os.path.exists(output_raster_uri):
@@ -112,19 +166,28 @@ class Denoise:
 
             matched_data = np.zeros((nl, ns, nb), dtype=np.float32)
 
-            for band in tqdm(range(nb)):
+            for band in tqdm(range(nb), ncols=100, colour='white'):
                 data = np.float32(input_raster.read_band(band))
                 matched_data[:, :, band] = match(data, width)
 
-            e.save_image(output_raster_uri, matched_data, metadata=meta, dtype=np.float32, interleave=interleave)
+            if save:
+                e.save_image(output_raster_uri, matched_data, metadata=meta, dtype=np.float32,
+                             interleave=interleave)
+            else:
+                return matched_data
+
             print('Done')
 
     @staticmethod
-    def lowpass(input_raster_uri, output_raster_uri, sigma=None):
+    def lowpass(input_raster_uri, output_raster_uri, sigma=None, save=True):
         '''
         Warning: gaussian_filter method from scipy.ndimage may cause a fuzzy result.
         Replaced by GaussianLowPass method from ENVItask in the main procedure
         '''
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
         print('Applying lowpass filter...')
 
         if os.path.exists(output_raster_uri):
@@ -140,28 +203,35 @@ class Denoise:
             if sigma is None:
                 sigma = 1.0
 
-            for band in tqdm(range(nb)):
+            for band in tqdm(range(nb), ncols=100, colour='white'):
                 data = np.float32(input_raster.read_band(band))
                 filtered_data[:, :, band] = gaussian_filter(data, sigma)
 
-            e.save_image(output_raster_uri, filtered_data, metadata=meta, dtype=np.float32, interleave=interleave)
+            if save:
+                e.save_image(output_raster_uri, filtered_data, metadata=meta, dtype=np.float32, interleave=interleave)
+            else:
+                return filtered_data
+
             print('Done')
 
 
 class Preprocess:
 
     @staticmethod
-    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=None, dest_interleave=None):
+    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=None, out_interleave=None, save=True):
         '''
         :param scale: scale factor in radiometric calibration
-        :param dest_interleave: interleave to save as. a string 'bsq', 'bil' or 'bip'
+        :param out_interleave: interleave to save as. a string 'bsq', 'bil' or 'bip'
         '''
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
 
         if scale is None:
             scale = 0.1
 
-        if dest_interleave is None:
-            dest_interleave = 'bil'
+        if out_interleave is None:
+            out_interleave = 'bil'
 
         print('Applying radiometric calibration...')
 
@@ -177,20 +247,117 @@ class Preprocess:
             nl, ns, nb = input_raster.shape
 
             new_data = np.zeros((nl, ns, nb), dtype=np.float32)
-            for i in tqdm(range(nb)):
-                new_data[:, :, i] = scale * (np.float32(gain[i]) * np.float32(input_raster.read_band(i)) + np.float32(offset[i]))
+            for i in tqdm(range(nb), ncols=100, colour='white'):
+                new_data[:, :, i] = scale * (
+                        np.float32(gain[i]) * np.float32(input_raster.read_band(i)) + np.float32(offset[i]))
 
-            meta.pop('data gain values')
-            meta.pop('data offset values')
+            if save:
+                meta.pop('data gain values')
+                meta.pop('data offset values')
 
-            print(f'Saving as {dest_interleave}...')
-            e.save_image(output_raster_uri, new_data, metadata=meta, dtype=np.float32, interleave=dest_interleave)
+                print(f'Saving as {out_interleave}...')
+                e.save_image(output_raster_uri, new_data, metadata=meta, dtype=np.float32, interleave=out_interleave)
+            else:
+                return new_data
+
+            print('Done')
+
+    @staticmethod
+    def saveSelectedBands(input_raster_uri, output_raster_uri, bands=None, out_interleave=None, save=True):
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
+        print('Saving selected bands...')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            input_raster = e.open(input_raster_uri)
+            meta = input_raster.metadata
+            interleave = meta['interleave']
+            nl, ns, nb = input_raster.shape
+
+            if bands is None:
+                bands = range(nb)
+
+            if out_interleave is None:
+                out_interleave = interleave
+
+            print('Generating metadata...')
+            new_meta = dict()
+            for key in tqdm(meta.keys(), ncols=100, colour='white'):
+                value = meta[key]
+                if isinstance(value, list) and len(value) == nb:
+                    new_meta[key] = [value[i] for i in bands]
+                else:
+                    new_meta[key] = value
+
+            new_data = input_raster.read_bands(bands)
+            if save:
+                print('Saving...')
+                e.save_image(output_raster_uri, new_data, metadata=new_meta, interleave=out_interleave,
+                             dtype=np.float32)
+            else:
+                return new_data
+
+            print('Done')
+
+    @staticmethod
+    def ASTER_EdgeExcision(input_raster_uri, output_raster_uri, background=0, save=True):
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
+        print('Excising ASTER redundant edge...')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            input_raster = e.open(input_raster_uri)
+            meta = input_raster.metadata
+            interleave = meta['interleave']
+            nl, ns, nb = input_raster.shape
+
+            meta['sensor type'] = 'ASTER'
+            meta['data ignore value'] = 0.0
+
+            print('Acquiring excision range...')
+            w = set()
+            for band in tqdm(range(nb), ncols=100, colour='white'):
+                temp = np.reshape(input_raster.read_band(band), (nl, ns))
+                w2 = np.where(np.logical_or(temp <= 0.0, np.isnan(temp)))
+                w.update(zip(w2[0], w2[1]))
+
+            print('Excising...')
+            new_data = np.zeros((nl, ns, nb), dtype=np.float32)
+            for band in tqdm(range(nb), ncols=100, colour='white'):
+                temp = np.reshape(input_raster.read_band(band), (nl, ns))
+                for coord in w:
+                    temp[coord] = background
+                new_data[:, :, band] = temp
+
+            if save:
+                e.save_image(output_raster_uri, new_data, metadata=meta, dtype=np.float32, interleave=interleave)
+            else:
+                return new_data
+
             print('Done')
 
 
 class Pca:
     @staticmethod
-    def forward(input_raster_uri, output_raster_uri):
+    def forward(input_raster_uri, output_raster_uri, keep_meta=True, save=True):
+        '''
+        :param input_raster_uri:
+        :param output_raster_uri:
+        :param keep_meta: set True or False to keep or not keep metadata of input raster
+        :return:
+        '''
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
         print('Applying PCA transformation...')
 
         if os.path.exists(output_raster_uri):
@@ -200,20 +367,34 @@ class Pca:
             data = np.float32(input_raster.load())
             meta = input_raster.metadata
             interleave = meta['interleave']
-            # nl, ns, nb = input_raster.shape
-            # new_band_names = [f'pc {i + 1}' for i in range(nb)]
-            # meta['band names'] = new_band_names
 
             sta = principal_components(data)
             # 主成分分析变换，将主成分矩阵重新构造为多波段影像
             pca_data = sta.transform(data)
 
-            e.save_image(output_raster_uri, pca_data, metadata=meta, dtype=np.float32, interleave=interleave)
+            if not keep_meta:
+                nl, ns, nb = input_raster.shape
+                new_band_names = [f'PC {i + 1}' for i in range(nb)]
+                meta['band names'] = new_band_names
+                # Delete spectra-related keys
+                spec_keys = ['wavelength', 'fwhm', 'wavelength units']
+                for spec_key in spec_keys:
+                    meta.pop(spec_key)
+
+            if save:
+                e.save_image(output_raster_uri, pca_data, metadata=meta, dtype=np.float32, interleave=interleave)
+                return sta
+            else:
+                return pca_data, sta
+
             print('Done')
-            return sta
 
     @staticmethod
-    def inverse(input_raster_uri, output_raster_uri, sta=None):
+    def inverse(input_raster_uri, output_raster_uri, sta=None, meta=None, save=True):
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
         print('Applying inverse-PCA transformation...')
 
         if os.path.exists(output_raster_uri):
@@ -224,11 +405,16 @@ class Pca:
             else:
                 input_raster = e.open(input_raster_uri)
                 pca_data = np.float32(input_raster.load())
-                meta = input_raster.metadata
+                if meta is None:
+                    meta = input_raster.metadata
                 interleave = meta['interleave']
                 # 逆变换，将主成分数据乘以主成分矩阵的转置，并加上均值
                 inverse_transformed_data = np.dot(pca_data, sta.eigenvectors.T) + sta.mean
 
-                e.save_image(output_raster_uri, inverse_transformed_data, metadata=meta, dtype=np.float32,
-                             interleave=interleave)
+                if save:
+                    e.save_image(output_raster_uri, inverse_transformed_data, metadata=meta, dtype=np.float32,
+                                 interleave=interleave)
+                else:
+                    return inverse_transformed_data
+
                 print('Done')
