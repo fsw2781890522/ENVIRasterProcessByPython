@@ -7,12 +7,12 @@ from envipyengine import Engine
 from auxfunc import *
 
 envi = Engine('ENVI')
-envipyengine.config.set('engine', r"D:\\SOFTWARE\\ENVI57\\ENVI57\\IDL89\\bin\\bin.x86_64\\taskengine.exe")
+envipyengine.config.set('engine', r"D:\\SOFTWARE\\ENVI56\\ENVI56\\IDL88\\bin\\bin.x86_64\\taskengine.exe")
 
 
 def ENVITime(acquisition_str):
     # 将 ACQUISITION 字符串转换为 datetime 对象
-    acquisition_datetime = datetime.fromisoformat(acquisition_str[:-7])  # 去除末尾的毫秒、 'Z'
+    acquisition_datetime = datetime.fromisoformat(acquisition_str.split('.')[0])  # 去除末尾的毫秒、 'Z'
 
     # 将 datetime 对象转换为 UTC 时间
     acquisition_utc = acquisition_datetime.replace(tzinfo=timezone.utc)
@@ -45,7 +45,7 @@ def ENVITime(acquisition_str):
 
 class Task:
     '''
-    Warning: ENVITask methods requires standard ENVIRaster (.dat/.img) as i/o
+    Warning: ENVITask methods requires standard ENVIRaster (.dat/.img) as input
         codes:
             input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
             output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
@@ -68,8 +68,34 @@ class Task:
             input_raster = dict(url=input_raster_uri, factory='URLRaster')
             parameters = dict(
                 INPUT_RASTER=input_raster,
-                # ADD_BACK=0.0,
+                ADD_BACK=0.3,
                 KERNEL_SIZE=[3, 3],
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def layerStack(input_raster_uris, output_raster_uri):
+        '''
+        :param input_raster_uris: a string list of input_raster_uri
+        :param output_raster_uri:
+        :return:
+        '''
+        print('Layer stacking...')
+
+        input_raster_uris = [input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img') for input_raster_uri in
+                             input_raster_uris]
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('BuildLayerStack')
+            input_rasters = [dict(url=input_raster_uri, factory='URLRaster') for input_raster_uri in input_raster_uris]
+            parameters = dict(
+                INPUT_RASTERS=input_rasters,
+                RESAMPLING='Nearest Neighbor',
                 OUTPUT_RASTER_URI=output_raster_uri
             )
             task.execute(parameters)
@@ -161,11 +187,14 @@ class Task:
 
         input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
         output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+        cloud_raster_uri = cloud_raster_uri.replace(get_fn_info(cloud_raster_uri).ext, 'img')
+        water_raster_uri = water_raster_uri.replace(get_fn_info(water_raster_uri).ext, 'img')
 
         if os.path.exists(output_raster_uri):
             print(output_raster_uri, 'already exists')
         else:
-            meta = e.open(input_raster_uri)
+            raster = e.open(input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr'))
+            meta = raster.metadata
             task = envi.task('FLAASH')
             input_raster = dict(url=input_raster_uri, factory='URLRaster')
             parameters = dict(
@@ -178,6 +207,7 @@ class Task:
                 DATE_TIME=ENVITime(meta['acquisition time']),
                 # SOLAR_AZIMUTH=float(meta['SOLAR AZIMUTH']),
                 # SOLAR_ZENITH=float(meta['SOLAR ZENITH']),
+                MODTRAN_ATM='Tropical Atmosphere',
                 USE_AEROSOL='Automatic Selection',
                 AEROSOL_SCALE_HT=2,
                 AER_REFERENCE_VALUE=0,
@@ -198,8 +228,9 @@ class Task:
         if os.path.exists(output_raster_uri):
             print(output_raster_uri, 'already exists')
         else:
-            meta = e.open(input_raster_uri)
-            task = envi.task('FLAASH')
+            raster = e.open(input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr'))
+            meta = raster.metadata
+            task = envi.task('ThermalAtmosphericCorrection')
             input_raster = dict(url=input_raster_uri, factory='URLRaster')
             parameters = dict(
                 INPUT_RASTER=input_raster,
@@ -229,6 +260,27 @@ class Task:
                 INPUT_RASTER=input_raster,
                 DEM_RASTER=dem_raster,
                 RESAMPLING='Nearest Neighbor',
+                OUTPUT_RASTER_URI=output_raster_uri
+            )
+            task.execute(parameters)
+            print('Done')
+
+    @staticmethod
+    def removeEdge(input_raster_uri, output_raster_uri, pixels=10):
+        print('Removing black edge...')
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'img')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'img')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            task = envi.task('RemoveRasterBlackEdge')
+            input_raster = dict(url=input_raster_uri, factory='URLRaster')
+            parameters = dict(
+                INPUT_RASTER=input_raster,
+                DATA_IGNORE_VALUE=0.0,
+                NUMBER_OF_PIXELS=pixels,
                 OUTPUT_RASTER_URI=output_raster_uri
             )
             task.execute(parameters)
