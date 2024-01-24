@@ -9,15 +9,20 @@ from imageprocess import *
 from auxfunc import *
 
 if __name__ == '__main__':
-    root_dir = r'I:\AGRS\20231120_ASTER_group1\ASTER_preprocessed'
-    work_dir = r'J:\20240103_Saudi_Group1_ASTER\PyProcessing'
-    result_dir = r'J:\20240103_Saudi_Group1_ASTER\PyPreprocessed'
-    MNF_dir = r'J:\20240103_Saudi_Group1_ASTER\MNF'
+    root_dir = r'H:\20240123_alter\ASTER_img'
+    work_dir = r'H:\20240123_alter\PyProcessing'
+    result_dir = r'H:\20240123_alter\PyPreprocessed'
+    MNF_dir = r'H:\20240123_alter\MNF'
+    combine_dir = r'H:\20240123_alter\Py_band_combination'
+    alter_dir = r'H:\20240123_alter\PyAlteration'
+    PCA_dir = r'H:\20240123_alter\PCA'
 
-    if os.path.exists(result_dir) is False:
+    if not os.path.exists(result_dir):
         os.makedirs(result_dir)
+    if not os.path.exists(MNF_dir):
+        os.makedirs(MNF_dir)
 
-    csv_fn = r"J:\20240103_Saudi_Group1_ASTER\selected.csv"
+    csv_fn = r"J:\20240103_Saudi_Group1_ASTER\whiteEdge_selected.csv"
 
     false_list = []
     time_list = []
@@ -34,74 +39,110 @@ if __name__ == '__main__':
     step6: 'rmEdge': Task.removeEdge
     '''
 
-    # fn_list = get_fn_list(r'J:\20231207_Altyn\ASTER_L1T', ext='hdf')
-    fn_list = get_fn_list(root_dir, ext='hdr', csv_fn=csv_fn)
+    fn_list = get_fn_list(root_dir=root_dir, ext='hdr')
+    # fn_list = get_fn_list(root_dir, ext='hdr', csv_fn=csv_fn, csv_header='filename')
+    # fn_list = [
+    #     r"J:\20240103_Saudi_Group1_ASTER\ASTER_group1_original_img\AST_L1T_00304142001075121_20150415165246_122495.hdr"]
 
     for idx, fn in enumerate(fn_list, start=1):
         print(f'Processing {get_fn_info(fn).base} | {idx}/{len(fn_list)} ...')
         input_raster_uri = fn
         basename = get_fn_info(fn).base
         opath = create_opath(input_raster_uri, work_dir, steps)
-        result_fn = os.path.join(result_dir, f'{basename}.img')
+        result_fn = os.path.join(result_dir, f'{basename}_pro.img')
         MNF_fn = os.path.join(MNF_dir, f'{basename}_MNF.img')
 
-        if os.path.exists(result_fn):
-            continue
+        # if os.path.exists(MNF_fn):
+        #     print(f'{basename} already preprocessed')
+        #     continue
+
+        if os.path.exists(input_raster_uri) is False:
+            print(f'{input_raster_uri} does not exist')
+            no_exist_list.append(basename)
         else:
-            if os.path.exists(input_raster_uri) is False:
-                print(f'{input_raster_uri} does not exist')
-                no_exist_list.append(basename)
+            input_raster = e.open(input_raster_uri)
+            # meta, bands = read_hdf(input_raster_uri)
+            # print(input_raster)
+            meta = input_raster.metadata
+            interleave = meta['interleave']
+            nl, ns, nb = input_raster.shape
+
+            if nb < 14:
+                print(f'Incomplete Data ({nb} bands)')
+                false_list.append(basename)
             else:
-                input_raster = e.open(input_raster_uri)
-                # meta, bands = read_hdf(input_raster_uri)
-                # print(input_raster)
-                meta = input_raster.metadata
-                interleave = meta['interleave']
-                nl, ns, nb = input_raster.shape
+                # if 'data gain values' not in meta or 'data offset values' not in meta:
+                #     print('Incomplete metadata (Gain or Offset value missed)')
+                #     false_list.append(basename)
+                # else:
 
-                if nb < 14:
-                    print(f'Incomplete Data ({nb} bands)')
-                    false_list.append(basename)
-                else:
-                    # if 'data gain values' not in meta or 'data offset values' not in meta:
-                    #     print('Incomplete metadata (Gain or Offset value missed)')
-                    #     false_list.append(basename)
-                    # else:
-                    import time
-                    import spectral.io.envi as e
+                start_time = time.time()
 
-                    start_time = time.time()
+                time_list.append(meta['acquisition time'])
+                file_list.append(basename)
 
-                    time_list.append(meta['acquisition time'])
-                    file_list.append(basename)
+                Preprocess.ASTER_EdgeExcision(input_raster_uri, opath['excision'])
 
-                    # Preprocess.ASTER_EdgeExcision(input_raster_uri, opath['excision'])
-                    #
-                    # Preprocess.RadioCali_ConvInter(input_raster_uri, opath['rad'], out_interleave='bil')
-                    # Preprocess.saveSelectedBands(opath['rad'], opath['VNSW_BIL'], bands=range(9),
-                    #                              out_interleave='bil')
-                    # Preprocess.saveSelectedBands(opath['rad'], opath['TIR_BIL'], bands=range(9, 14),
-                    #                              out_interleave='bil')
-                    #
-                    # Task.ASTER_FLAASH(opath['VNSW_BIL'], opath['fla'], opath['cloud'], opath['water'])
-                    # Task.ASTER_TIR_AtmosCor(opath['TIR_BIL'], opath['cor'])
-                    #
-                    # Task.layerStack([opath['fla'], opath['cor']], opath['stack'])
+                Preprocess.RadioCali_ConvInter(input_raster_uri, opath['rad'], out_interleave='bil',
+                                               data_ignore_value=0.0)
+                Preprocess.saveSelectedBands(opath['rad'], opath['VNSW_BIL'], bands=range(9),
+                                             out_interleave='bil')
+                Preprocess.saveSelectedBands(opath['rad'], opath['TIR_BIL'], bands=range(9, 14),
+                                             out_interleave='bil')
 
-                    # Task.removeEdge(opath['stack'], opath['rmEdge'], pixels=100)
-                    Task.removeEdge(fn, opath['rmEdge'], pixels=100)
-                    Preprocess.ASTER_EdgeExcision(opath['rmEdge'], result_fn)
+                Task.ASTER_FLAASH(opath['VNSW_BIL'], opath['fla'], opath['cloud'], opath['water'])
+                Task.ASTER_TIR_AtmosCor(opath['TIR_BIL'], opath['cor'])
 
-                    # Add time attr to metadata (time lost in Task.removeEdge)
-                    result_meta_fn = result_fn.replace(get_fn_info(result_fn).ext, 'hdr')
-                    result_meta = e.open(result_meta_fn).metadata
-                    result_meta['acquisition time'] = meta['acquisition time']
-                    # pprint(result_meta)
-                    e.write_envi_header(result_meta_fn, result_meta)
+                Task.layerStack([opath['fla'], opath['cor']], opath['stack'])
 
-                    end_time = time.time()
-                    consume = format_time(end_time - start_time)
-                    print(f"Workflow consumed time: {consume}")
+                Task.removeEdge(opath['stack'], opath['rmEdge'], pixels=100)
+                # Task.removeEdge(fn, opath['rmEdge'], pixels=100)
+                Preprocess.ASTER_EdgeExcision(opath['rmEdge'], result_fn)
+
+                # Add time attr to metadata (time lost in Task.removeEdge)
+                result_meta_fn = result_fn.replace(get_fn_info(result_fn).ext, 'hdr')
+                result_meta = e.open(result_meta_fn).metadata
+                result_meta['acquisition time'] = meta['acquisition time']
+                # pprint(result_meta)
+                e.write_envi_header(result_meta_fn, result_meta)
+
+                Task.MNF_Trans(result_fn, MNF_fn)
+
+                features = [
+                    'AlOH_minerals,advanced_argillic_alteration',
+                    'Clay,amphibole,laterite',
+                    'Gossan,alteration,host_rock(1)',
+                    'Decorellation',
+                    'Silica,carbonate',
+                    'Discrimination_for_mapping',
+                    'Discrimination_in_sulphide_rich_areas',
+                    'Silica,Fe2+',
+                    'Enhanced_structual_features']
+
+                for feature in features:
+                    BandMath.ASTER_combine(result_fn, MNF_fn, feature, combine_dir)
+
+                PCA_fn = os.path.join(MNF_dir, f'{basename}_PCA.img')
+                # alter_dir = os.path.join()
+                alters = ['Fe_PC3', 'Fe_PC4', 'Al-OH_sericite', 'Al-OH_kaolinite', 'propy']
+                PCA_bands = ['1234', '1346', '1345', '1348']
+                alter_path = create_opath(input_raster_uri, alter_dir, steps=alters)
+                PCA_path = create_opath(input_raster_uri, PCA_dir, steps=PCA_bands)
+
+                BandMath.find_alteration(result_fn, PCA_path['1234'], alter_path['Fe_PC3'], bands=[1, 2, 3, 4],
+                                         feature_PC=3)
+                BandMath.find_alteration(result_fn, PCA_path['1234'], alter_path['Fe_PC4'], bands=[1, 2, 3, 4],
+                                         feature_PC=4)
+                BandMath.find_alteration(result_fn, PCA_path['1346'], alter_path['Al-OH_sericite'], bands=[1, 3, 4, 6],
+                                         feature_PC=4, inverse=True)
+                BandMath.find_alteration(result_fn, PCA_path['1345'], alter_path['Al-OH_kaolinite'], bands=[1, 3, 4, 5],
+                                         feature_PC=4)
+                BandMath.find_alteration(result_fn, PCA_path['1348'], alter_path['propy'], bands=[1, 3, 4, 8],
+                                         feature_PC=3, inverse=True)
+
+                end_time = time.time()
+                consume = format_time(end_time - start_time)
+                print(f"Workflow consumed time: {consume}")
 
     if false_list:
         pprint(false_list)
