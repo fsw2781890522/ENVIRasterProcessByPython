@@ -50,93 +50,93 @@ def read_hdf(hdf_file_path):
     return metadata, data_array
 
 
-def cal_stats(window):
-    '''
-    :param window: a sliding 2D-Array, same nRows as image, assigned nColumns by user(default: same nColumns as image)
-        extracted from a single band of an image
-    :return: an object with attributes miu_ref, sigma_ref, miu, sigma
-    miu_ref: a single number. the mean value of total window
-    sigma_ref: a single number. the std value of total window
-    miu: an array which records mean values of each column in window
-    sigma: an array which records std values of each column in window
-    '''
-    miu_sum = 0.0
-    sigma_sum = 0.0
-    miu = []
-    sigma = []
+class Denoise:
 
-    for j in range(window.shape[1]):
-        column = window[:, j]
-
-        ht, locations = np.histogram(column, bins=200)
-        ht_acc = np.cumsum(ht) / np.prod(column.shape)
+    @staticmethod
+    def cal_stats(window):
         '''
-        ht_acc: accumulative frequency of histogram
-        note: ht, locations = np.histogram(column, bins=200, density=true) easily cause error
+        :param window: a sliding 2D-Array, same nRows as image, assigned nColumns by user(default: same nColumns as image)
+            extracted from a single band of an image
+        :return: an object with attributes miu_ref, sigma_ref, miu, sigma
+        miu_ref: a single number. the mean value of total window
+        sigma_ref: a single number. the std value of total window
+        miu: an array which records mean values of each column in window
+        sigma: an array which records std values of each column in window
         '''
-        w1 = np.where(ht_acc >= 0.99)
-        w2 = np.where(ht_acc >= 0.01)
-        max_val = locations[w1[0][0]]
-        min_val = locations[w2[0][0]]
-
-        w = np.where((column >= min_val) & (column <= max_val))
-        temp = column[w]
-        miu.append(np.nanmean(temp))
-        sigma.append(np.nanstd(temp))
-        miu_sum += np.nanmean(temp)
-        sigma_sum += np.nanstd(temp)
-
-    miu_ref = miu_sum / float(window.shape[1])
-    sigma_ref = sigma_sum / float(window.shape[1])
-
-    # 构建stats对象
-    class Stats:
-        def __init__(self, miu_ref, sigma_ref, miu, sigma):
-            self.miu_ref = miu_ref
-            self.sigma_ref = sigma_ref
-            self.miu = miu
-            self.sigma = sigma
-
-    # 返回stats对象
-    return Stats(miu_ref, sigma_ref, miu, sigma)
-
-    # stats = {'mean_ref': miu_ref, 'std_ref': sigma_ref, 'mean': miu, 'std': sigma}
-    # return stats
-
-
-def match(arr, width):
-    '''
-    To moment match a single band in an image.
-    :param arr: a 2D-array. a single band data
-    :param width: the width a sliding window in which moment match is applied
-    :return: a moment matched 2D-array as a processed single band
-    '''
-    nl, ns = arr.shape
-    result_arr = arr
-
-    for i in range(ns - width + 1):
-        window = arr[:, i: i + width]
-        stats = cal_stats(window)
-        miu_ref = stats.miu_ref
-        sigma_ref = stats.sigma_ref
-        miu_vals = stats.miu
-        sigma_vals = stats.sigma
+        miu_sum = 0.0
+        sigma_sum = 0.0
+        miu = []
+        sigma = []
 
         for j in range(window.shape[1]):
-            # check if sigma_vals[j] is zero to avoid divide by zero error
-            if sigma_vals[j] != 0:
-                gain = sigma_ref / sigma_vals[j]
-                offset = miu_ref - (gain * miu_vals[j])
-                # prevent from extreme coefficient
-                if gain <= 5:
-                    window[:, j] = gain * window[:, j] + offset
+            column = window[:, j]
 
-        result_arr[:, i: i + width] = window
+            ht, locations = np.histogram(column, bins=200)
+            ht_acc = np.cumsum(ht) / np.prod(column.shape)
+            '''
+            ht_acc: accumulative frequency of histogram
+            note: ht, locations = np.histogram(column, bins=200, density=true) easily cause error
+            '''
+            w1 = np.where(ht_acc >= 0.99)
+            w2 = np.where(ht_acc >= 0.01)
+            max_val = locations[w1[0][0]]
+            min_val = locations[w2[0][0]]
 
-    return result_arr
+            w = np.where((column >= min_val) & (column <= max_val))
+            temp = column[w]
+            miu.append(np.nanmean(temp))
+            sigma.append(np.nanstd(temp))
+            miu_sum += np.nanmean(temp)
+            sigma_sum += np.nanstd(temp)
 
+        miu_ref = miu_sum / float(window.shape[1])
+        sigma_ref = sigma_sum / float(window.shape[1])
 
-class Denoise:
+        # 构建stats对象
+        class Stats:
+            def __init__(self, miu_ref, sigma_ref, miu, sigma):
+                self.miu_ref = miu_ref
+                self.sigma_ref = sigma_ref
+                self.miu = miu
+                self.sigma = sigma
+
+        # 返回stats对象
+        return Stats(miu_ref, sigma_ref, miu, sigma)
+
+        # stats = {'mean_ref': miu_ref, 'std_ref': sigma_ref, 'mean': miu, 'std': sigma}
+        # return stats
+
+    @staticmethod
+    def match(arr, width):
+        '''
+        To moment match a single band in an image.
+        :param arr: a 2D-array. a single band data
+        :param width: the width a sliding window in which moment match is applied
+        :return: a moment matched 2D-array as a processed single band
+        '''
+        nl, ns = arr.shape
+        result_arr = arr
+
+        for i in range(ns - width + 1):
+            window = arr[:, i: i + width]
+            stats = Denoise.cal_stats(window)
+            miu_ref = stats.miu_ref
+            sigma_ref = stats.sigma_ref
+            miu_vals = stats.miu
+            sigma_vals = stats.sigma
+
+            for j in range(window.shape[1]):
+                # check if sigma_vals[j] is zero to avoid divide by zero error
+                if sigma_vals[j] != 0:
+                    gain = sigma_ref / sigma_vals[j]
+                    offset = miu_ref - (gain * miu_vals[j])
+                    # prevent from extreme coefficient
+                    if gain <= 5:
+                        window[:, j] = gain * window[:, j] + offset
+
+            result_arr[:, i: i + width] = window
+
+        return result_arr
 
     @staticmethod
     def moment_matching(input_raster_uri, output_raster_uri, width=None, save=True):
@@ -168,7 +168,7 @@ class Denoise:
 
             for band in tqdm(range(nb), ncols=100, colour='white'):
                 data = np.float32(input_raster.read_band(band))
-                matched_data[:, :, band] = match(data, width)
+                matched_data[:, :, band] = Denoise.match(data, width)
 
             if save:
                 e.save_image(output_raster_uri, matched_data, metadata=meta, dtype=np.float32,
@@ -218,7 +218,8 @@ class Denoise:
 class Preprocess:
 
     @staticmethod
-    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=None, out_interleave=None, save=True):
+    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=None, out_interleave=None, data_ignore_value=0.0,
+                            save=True):
         '''
         :param scale: scale factor in radiometric calibration
         :param out_interleave: interleave to save as. a string 'bsq', 'bil' or 'bip'
@@ -248,9 +249,17 @@ class Preprocess:
 
             new_data = np.zeros((nl, ns, nb), dtype=np.float32)
             for i in tqdm(range(nb), ncols=100, colour='white'):
+                data = np.reshape(input_raster.read_band(i), (nl, ns))
+                # for row in w[0]:
+                #     for col in w[1]:
                 new_data[:, :, i] = scale * (
-                        np.float32(gain[i]) * np.float32(input_raster.read_band(i)) + np.float32(offset[i]))
+                        np.float32(gain[i]) * np.float32(data) + np.float32(offset[i]))
+                w = np.where(data == data_ignore_value)
+                coords = zip(w[0], w[1])
+                for coord in coords:
+                    new_data[coord] = data_ignore_value
 
+            meta['data ignore value'] = data_ignore_value
             if save:
                 meta.pop('data gain values')
                 meta.pop('data offset values')
@@ -286,12 +295,13 @@ class Preprocess:
 
             print('Generating metadata...')
             new_meta = dict()
-            for key in tqdm(meta.keys(), ncols=100, colour='white'):
+            for key in meta.keys():
                 value = meta[key]
                 if isinstance(value, list) and len(value) == nb:
                     new_meta[key] = [value[i] for i in bands]
                 else:
                     new_meta[key] = value
+            new_meta['data ignore value'] = 0.0
 
             new_data = input_raster.read_bands(bands)
             if save:
@@ -326,7 +336,7 @@ class Preprocess:
             w = set()
             for band in tqdm(range(nb), ncols=100, colour='white'):
                 temp = np.reshape(input_raster.read_band(band), (nl, ns))
-                w2 = np.where(np.logical_or(temp <= 0.0, np.isnan(temp)))
+                w2 = np.where(np.logical_or(temp == 0.0, np.isnan(temp)))
                 w.update(zip(w2[0], w2[1]))
 
             print('Excising...')
@@ -347,11 +357,12 @@ class Preprocess:
 
 class Pca:
     @staticmethod
-    def forward(input_raster_uri, output_raster_uri, keep_meta=True, save=True):
+    def forward(input_raster_uri, output_raster_uri=None, keep_meta=True, save=True, bands=None):
         '''
         :param input_raster_uri:
         :param output_raster_uri:
         :param keep_meta: set True or False to keep or not keep metadata of input raster
+        :param bands: an index list of output bands
         :return:
         '''
 
@@ -366,6 +377,7 @@ class Pca:
             input_raster = e.open(input_raster_uri)
             data = np.float32(input_raster.load())
             meta = input_raster.metadata
+            nl, ns, nb = input_raster.shape
             interleave = meta['interleave']
 
             sta = principal_components(data)
@@ -376,16 +388,30 @@ class Pca:
                 nl, ns, nb = input_raster.shape
                 new_band_names = [f'PC {i + 1}' for i in range(nb)]
                 meta['band names'] = new_band_names
+                meta['description'] = 'PCA result'
                 # Delete spectra-related keys
-                spec_keys = ['wavelength', 'fwhm', 'wavelength units']
+                spec_keys = ['wavelength', 'fwhm', 'wavelength units', 'data gain values', 'data offset values']
                 for spec_key in spec_keys:
-                    meta.pop(spec_key)
+                    if spec_key in meta:
+                        meta.pop(spec_key)
+
+            if bands is None:
+                bands = range(nb)
+
+            new_meta = dict()
+            for key in meta.keys():
+                value = meta[key]
+                if isinstance(value, list) and len(value) == nb:
+                    new_meta[key] = [value[i] for i in bands]
+                else:
+                    new_meta[key] = value
 
             if save:
-                e.save_image(output_raster_uri, pca_data, metadata=meta, dtype=np.float32, interleave=interleave)
+                e.save_image(output_raster_uri, np.take(pca_data, bands, axis=2), metadata=new_meta, dtype=np.float32,
+                             interleave=interleave)
                 return sta
             else:
-                return pca_data, sta
+                return np.take(pca_data, bands, axis=2), sta
 
             print('Done')
 
@@ -418,3 +444,364 @@ class Pca:
                     return inverse_transformed_data
 
                 print('Done')
+
+
+class BandMath:
+
+    @staticmethod
+    def safe_divide(arr1, arr2):
+        # return np.where(y != 0, np.divide(x, y), 0)
+        return np.divide(arr1, arr2, where=(arr2 != 0), out=np.zeros_like(arr1))
+
+    @staticmethod
+    def normalize(arr):
+
+        print('Normalizing...')
+        # temp = np.zeros_like(arr, dtype=np.float32)
+
+        # ne0 = np.where(arr != 0.0)
+        # eq0 = np.where(arr == 0.0)
+        # ne0_coords = zip(ne0[0], ne0[1])
+        # for coord in ne0_coords:
+        #     temp[coord] = arr[coord]
+        temp = arr[arr != 0.0]
+
+        offset = np.abs(np.min(temp)) + 1e-13
+        # print('offset:', offset)
+        temp = temp + offset
+
+        ht, locations = np.histogram(temp, bins=1000)
+        ht_acc = np.cumsum(ht) / np.prod(temp.shape)
+        '''
+        ht_acc: accumulative frequency of histogram
+        note: ht, locations = np.histogram(column, bins=200, density=true) easily cause error
+        '''
+        w1 = np.where(ht_acc >= 0.999)
+        w2 = np.where(ht_acc >= 0.001)
+        max_val = locations[w1[0][0]]
+        min_val = locations[w2[0][0]]
+        print(max_val, min_val)
+
+        ltmin = (temp < min_val)
+        gtmax = (temp > max_val)
+
+        # for i in range(len(temp)):
+        #     temp[i] = 1000.0 * (temp[i] - min_val) / (max_val - min_val)
+
+        temp = 1000.0 * (temp - min_val) / (max_val - min_val)
+        temp[ltmin] = 1e-13
+        temp[gtmax] = 1000.0
+        arr[arr != 0.0] = temp
+
+        # inf = np.where(np.isfinite(arr) != 1)
+        arr[np.isfinite(arr) != 1] = 0.0
+
+        nl, ns = arr.shape
+
+        new_arr = arr.copy()
+
+        # print('Filling in the blank pixels...')
+        # for i in range(1, nl - 1):
+        #     for j in range(1, ns - 1):
+        #         if arr[i, j] == 0.0:
+        #             top = arr[i, j - 1]
+        #             bottom = arr[i, j + 1]
+        #             left = arr[i - 1, j]
+        #             right = arr[i + 1, j]
+        #             if np.mean([top, bottom, left, right]) > 0.0:
+        #                 new_arr[i, j] = max([top, bottom, left, right])
+
+        # # Create masks for blank pixels
+        # blank_pixels = (arr == 0.0)
+        #
+        # # Create a binary mask for non-blank pixels
+        # non_blank_pixels = ~blank_pixels
+        #
+        # # Create padding for neighboring pixels
+        # top = np.roll(arr, shift=(0, -1), axis=(0, 1))[non_blank_pixels]
+        # bottom = np.roll(arr, shift=(0, 1), axis=(0, 1))[non_blank_pixels]
+        # left = np.roll(arr, shift=(-1, 0), axis=(0, 1))[non_blank_pixels]
+        # right = np.roll(arr, shift=(1, 0), axis=(0, 1))[non_blank_pixels]
+        #
+        # # Calculate mean of non-zero neighbors
+        # mean_values = np.mean([top, bottom, left, right], axis=0)
+        #
+        # # Find positions where mean is greater than 0
+        # update_positions = mean_values > 0.0
+        #
+        # # Update new_arr only for blank pixels where mean is greater than 0
+        # new_arr[blank_pixels][update_positions] = np.maximum.reduce([top, bottom, left, right], axis=0)
+
+        return new_arr
+
+    @staticmethod
+    def ASTER_combine(stack_raster_uri, MNF_raster_uri, feature_name, out_dir):
+
+        stack_raster_uri = stack_raster_uri.replace(get_fn_info(stack_raster_uri).ext, 'hdr')
+        MNF_raster_uri = MNF_raster_uri.replace(get_fn_info(MNF_raster_uri).ext, 'hdr')
+
+        basename = get_fn_info(stack_raster_uri).base
+        o_folder = os.path.join(out_dir, feature_name)
+        if not os.path.exists(o_folder):
+            os.makedirs(o_folder)
+
+        o_fn = os.path.join(o_folder, f'{basename}_{feature_name}.hdr')
+
+        if os.path.exists(o_fn):
+            print(f'{o_fn} already generated')
+        else:
+            stack_raster = e.open(stack_raster_uri)
+            MNF_raster = e.open(MNF_raster_uri)
+            meta = stack_raster.metadata
+            nl, ns, nb = stack_raster.shape
+
+            b1 = np.float32(stack_raster.read_band(0))
+            b2 = np.float32(stack_raster.read_band(1))
+            b3 = np.float32(stack_raster.read_band(2))
+            b4 = np.float32(stack_raster.read_band(3))
+            b5 = np.float32(stack_raster.read_band(4))
+            b6 = np.float32(stack_raster.read_band(5))
+            b7 = np.float32(stack_raster.read_band(6))
+            b8 = np.float32(stack_raster.read_band(7))
+            b9 = np.float32(stack_raster.read_band(8))
+            b10 = np.float32(stack_raster.read_band(9))
+            b11 = np.float32(stack_raster.read_band(10))
+            b12 = np.float32(stack_raster.read_band(11))
+            b13 = np.float32(stack_raster.read_band(12))
+            b14 = np.float32(stack_raster.read_band(13))
+
+            MNF_b1 = np.float32(MNF_raster.read_band(0))
+
+            R_info, G_info, B_info, refer = '', '', '', ''
+
+            if feature_name == 'vegetation_and_visible_bands':
+                R = BandMath.safe_divide(b3, b2)
+                G = b2
+                B = b1
+                R_info = 'b3 / b2'
+                G_info = 'b2'
+                B_info = 'b1'
+                refer = ''
+
+            if feature_name == 'AlOH_minerals,advanced_argillic_alteration':
+                R = BandMath.safe_divide(b5, b6)
+                G = BandMath.safe_divide(b7, b6)
+                B = BandMath.safe_divide(b7, b5)
+                R_info = 'b5 / b6'
+                G_info = 'b7 / b6'
+                B_info = 'b7 / b5'
+                refer = 'Hewson(CSIRO)'
+
+            if feature_name == 'Clay,amphibole,laterite':
+                R = BandMath.safe_divide((b5 * b7), (b6 * b6))
+                G = BandMath.safe_divide(b6, b8)
+                B = BandMath.safe_divide(b4, b5)
+                R_info = '(b5 * b7) / (b6 * b6)'
+                G_info = 'b6 / b8'
+                B_info = 'b4 / b5'
+                refer = 'Bierwith'
+
+            if feature_name == 'Gossan,alteration,host_rock(1)':
+                R = BandMath.safe_divide(b4, b2)
+                G = BandMath.safe_divide(b4, b5)
+                B = BandMath.safe_divide(b5, b6)
+                R_info = 'b4 / b2'
+                G_info = 'b4 / b5'
+                B_info = 'b5 / b6'
+                refer = 'Volesky'
+
+            if feature_name == 'Gossan,alteration,host_rock(2)':
+                R = b6
+                G = b2
+                B = b1
+                R_info = 'b6'
+                G_info = 'b2'
+                B_info = 'b1'
+                refer = ''
+
+            if feature_name == 'Decorellation':
+                R = b13
+                G = b12
+                B = b10
+                R_info = 'b13'
+                G_info = 'b12'
+                B_info = 'b10'
+                refer = 'Bierwith'
+
+            # if feature_name == 'Silica,carbonate,basic_degree_index':
+            #     R = (b11 ^ 2) / b10 / b12
+            #     G = b13 / b14
+            #     B = b12 / b13
+            #     R_info = '(b11 * b11) / b10 / b12'
+            #     G_info = 'b13 / b14'
+            #     B_info = 'b12 / b13'
+            #     refer = 'Bierwith'
+
+            if feature_name == 'Silica,carbonate':
+                R = BandMath.safe_divide((b11 ** 2), (b10 * b12))
+                G = BandMath.safe_divide(b13, b14)
+                B = BandMath.safe_divide(b12, b13)
+                R_info = '(b11 * b11) / (b10 * b12)'
+                G_info = 'b13 / b14'
+                B_info = 'b12 / b13'
+                refer = 'Nimoyima'
+
+            if feature_name == 'Silica':
+                R = BandMath.safe_divide(b11, b10)
+                G = BandMath.safe_divide(b11, b12)
+                B = BandMath.safe_divide(b13, b10)
+                R_info = 'b11 / b10'
+                G_info = 'b11 / b12'
+                B_info = 'b13 / b10'
+                refer = 'CRISO'
+
+            if feature_name == 'Discrimination_for_mapping':
+                R = BandMath.safe_divide(b4, b1)
+                G = BandMath.safe_divide(b3, b1)
+                B = BandMath.safe_divide(b12, b14)
+                R_info = 'b4 / b1'
+                G_info = 'b3 / b1'
+                B_info = 'b12 / b14'
+                refer = 'Abdelsalam'
+
+            if feature_name == 'Discrimination_in_sulphide_rich_areas':
+                R = b12
+                G = b5
+                B = b3
+                R_info = 'b12'
+                G_info = 'b5'
+                B_info = 'b3'
+                refer = ''
+
+            if feature_name == 'Discrimination(1)':
+                R = BandMath.safe_divide(b4, b7)
+                G = BandMath.safe_divide(b4, b1)
+                B = (BandMath.safe_divide(b2, b3)) * (BandMath.safe_divide(b4, b3))
+                R_info = 'b4 / b7'
+                G_info = 'b4 / b1'
+                B_info = '(b2 / b3) * (b4 / b3)'
+                refer = 'Sultan'
+
+            if feature_name == 'Discrimination(2)':
+                R = BandMath.safe_divide(b4, b7)
+                G = BandMath.safe_divide(b4, b3)
+                B = BandMath.safe_divide(b2, b1)
+                R_info = 'b4 / b7'
+                G_info = 'b4 / b3'
+                B_info = 'b2 / b1'
+                refer = 'Abrams(USGS)'
+
+            if feature_name == 'Silica,Fe2+':
+                R = BandMath.safe_divide(b14, b12)
+                G = (BandMath.safe_divide(b1, b2)) * (BandMath.safe_divide(b5, b3))
+                B = MNF_b1
+                R_info = 'b14 / b12'
+                G_info = '(b1 / b2) * (b5 / b3)'
+                B_info = 'MNF b1'
+                refer = 'Rowan(USGS)'
+
+            if feature_name == 'Enhanced_structual_features':
+                R = b7
+                G = b4
+                B = b2
+                R_info = 'b7'
+                G_info = 'b4'
+                B_info = 'b2'
+                refer = 'Rowan(USGS)'
+
+            R = BandMath.normalize(R)
+            G = BandMath.normalize(G)
+            B = BandMath.normalize(B)
+
+            idx_data = np.stack([R, G, B], axis=-1)
+
+            idx_meta = dict()
+            for key in meta.keys():
+                value = meta[key]
+                if not isinstance(value, list):
+                    idx_meta[key] = meta[key]
+                elif isinstance(value, list) and len(value) != 14:
+                    idx_meta[key] = meta[key]
+
+            idx_meta['Feature'] = feature_name
+            idx_meta['Red'] = R_info
+            idx_meta['Green'] = G_info
+            idx_meta['Blue'] = B_info
+            idx_meta['Reference'] = refer
+
+            print(f'Writing {feature_name} raster...')
+            e.save_image(o_fn, idx_data, metadata=idx_meta, dtype=np.float32, interleave='bsq')
+
+    @staticmethod
+    def find_alteration(input_raster_uri, PCA_raster_uri, alter_raster_uri, bands, feature_PC,
+                        inverse=False):
+        if os.path.exists(alter_raster_uri):
+            print(f'{alter_raster_uri} already generated')
+        else:
+            input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+            input_raster = e.open(input_raster_uri)
+            meta = input_raster.metadata
+            template = input_raster.read_band(0)
+            w = (template == 0.0)
+            # selected_raster_uri = selected_raster_uri.replace(get_fn_info(selected_raster_uri).ext, 'hdr')
+            PCA_raster_uri = PCA_raster_uri.replace(get_fn_info(PCA_raster_uri).ext, 'hdr')
+            alter_raster_uri = alter_raster_uri.replace(get_fn_info(alter_raster_uri).ext, 'hdr')
+
+            Pca.forward(input_raster_uri, PCA_raster_uri, keep_meta=False, bands=[band - 1 for band in bands])
+            pca_data = e.open(PCA_raster_uri).load().copy()
+            for i in range(pca_data.shape[2]):
+                temp = pca_data[:, :, i]
+                temp[w] = 0.0
+                pca_data[:, :, i] = temp
+
+            feature = np.float32(pca_data[:, :, feature_PC - 1])
+
+            if inverse:
+                factor = 1.0
+            else:
+                factor = -1.0
+
+            feature = factor * feature
+
+            mean = np.nanmean(feature)
+            std = np.nanstd(feature)
+
+            threshold1 = mean + (1.5 * std)
+            threshold2 = mean + (2.0 * std)
+            threshold3 = mean + (2.5 * std)
+
+            threshold1n = mean - (1.5 * std)
+            threshold2n = mean - (2.0 * std)
+            threshold3n = mean - (2.5 * std)
+
+            print(threshold1, threshold2, threshold3, threshold1n, threshold2n, threshold3n)
+
+            w1 = (feature < threshold1) | (feature > threshold1n)
+            w2 = ((feature >= threshold1) & (feature < threshold2)) | (
+                        (feature >= threshold2n) & (feature < threshold1n))
+            w3 = ((feature >= threshold2) & (feature < threshold3)) | (
+                        (feature >= threshold3n) & (feature < threshold2n))
+            w4 = (feature >= threshold3) | (feature < threshold3n)
+            feature[w1] = 0.0  # unclassified
+            feature[w2] = 1.0  # level3
+            feature[w3] = 2.0  # level2
+            feature[w4] = 3.0  # level1
+
+            new_meta = dict()
+            for key in meta.keys():
+                value = meta[key]
+                if not isinstance(value, list):
+                    new_meta[key] = meta[key]
+                elif isinstance(value, list) and len(value) != 14:
+                    new_meta[key] = meta[key]
+
+            new_meta['classes'] = 4
+            new_meta['class names'] = ['Unclassified', 'level1', 'level2', 'level3']
+            # new_meta['class lookup'] = [
+            #     [np.array([255, 255, 255], dtype=np.byte)],  # White
+            #     [np.array([255, 0, 0], dtype=np.byte)],  # Red
+            #     [np.array([255, 255, 0], dtype=np.byte)],  # Yellow
+            #     [np.array([0, 255, 0], dtype=np.byte)]  # Green
+            # ]
+
+            e.save_image(alter_raster_uri, feature, metadata=new_meta, dtype=np.int16, interleave='bsq')
