@@ -9,47 +9,56 @@ from imageprocess import *
 from auxfunc import *
 
 if __name__ == '__main__':
-    root_dir = r'H:\20240123_alter\ASTER_img'
-    work_dir = r'H:\20240123_alter\PyProcessing'
-    result_dir = r'H:\20240123_alter\PyPreprocessed'
-    MNF_dir = r'H:\20240123_alter\MNF'
-    combine_dir = r'H:\20240123_alter\Py_band_combination'
-    alter_dir = r'H:\20240123_alter\PyAlteration'
-    PCA_dir = r'H:\20240123_alter\PCA'
 
-    if not os.path.exists(result_dir):
-        os.makedirs(result_dir)
-    if not os.path.exists(MNF_dir):
-        os.makedirs(MNF_dir)
+    root_dir = r'H:\20240214_ASTER_Group1'
 
-    csv_fn = r"J:\20240103_Saudi_Group1_ASTER\whiteEdge_selected.csv"
+    input_dir = os.path.join(root_dir, 'ASTER_original_img')
+    work_dir = os.path.join(root_dir, 'PyProcessing')
+    output_dir = os.path.join(root_dir, 'PyPreprocessed')
+    MNF_dir = os.path.join(root_dir, 'MNF')
+    combine_dir = os.path.join(root_dir, 'Py_band_combination')
+    alter_dir = os.path.join(root_dir, 'PyAlteration')
+    PCA_dir = os.path.join(root_dir, 'PCA')
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    # if not os.path.exists(MNF_dir):
+    #     os.makedirs(MNF_dir)
+
+    # csv_fn = r"J:\20240103_Saudi_Group1_ASTER\whiteEdge_selected.csv"
 
     false_list = []
     time_list = []
     file_list = []
     no_exist_list = []
 
-    steps = ['excision', 'rad', ['VNSW_BIL', 'TIR_BIL'], ['fla', 'cloud', 'water', 'cor'], 'stack', 'rmEdge']
+    steps = ['rad', ['VNSW_BIL', 'TIR_BIL'], ['fla', 'fla_mod', 'cloud', 'water', 'cor', 'cor_mod'], 'stack', 'excision']
+
+    # steps = ['rad', ['VNSW_BIL', 'TIR_BIL']]
     '''
+    ['excision', 'rad', ['VNSW_BIL', 'TIR_BIL'], ['fla', 'cloud', 'water', 'cor'], 'stack', 'rmEdge']
     step1 'excision': Preprocess.ASTER_EdgeExcision
     step2 'rad': Preprocess.RadioCali_ConvInter
+    
+    20240227 Note: excision and rad have been integrated into a single function: Preprocess.ASTER_EdgeExc_RadioCali_ConvInter
+    
     step3 'VNSW_BIL', 'TIR_BIL': Preprocess.saveSelectedBands
-    step4: 'fla', 'cloud', 'water', 'cor': Task.ASTER_FLAASH, Task.ASTER_TIR_AtmosCor
-    step5: 'stack': Task.layerStack
-    step6: 'rmEdge': Task.removeEdge
+    step4 'fla', 'cloud', 'water', 'cor': Task.ASTER_FLAASH, Task.ASTER_TIR_AtmosCor
+    step5 'stack': Task.layerStack
+    step6 'rmEdge': Task.removeEdge
     '''
 
-    fn_list = get_fn_list(root_dir=root_dir, ext='hdr')
-    # fn_list = get_fn_list(root_dir, ext='hdr', csv_fn=csv_fn, csv_header='filename')
-    # fn_list = [
-    #     r"J:\20240103_Saudi_Group1_ASTER\ASTER_group1_original_img\AST_L1T_00304142001075121_20150415165246_122495.hdr"]
+    # fn_list = get_fn_list(input_dir=input_dir, ext='hdr')
+    # fn_list = get_fn_list(input_dir, ext='hdr', csv_fn=csv_fn, csv_header='filename')
+    fn_list = [
+        r"H:\20240214_ASTER_Group1\ASTER_original_img\AST_L1T_00311242001074543_20150420134700_114978.hdr"]
 
     for idx, fn in enumerate(fn_list, start=1):
         print(f'Processing {get_fn_info(fn).base} | {idx}/{len(fn_list)} ...')
         input_raster_uri = fn
         basename = get_fn_info(fn).base
         opath = create_opath(input_raster_uri, work_dir, steps)
-        result_fn = os.path.join(result_dir, f'{basename}_pro.img')
+        output_fn = os.path.join(output_dir, f'{basename}_pro.img')
         MNF_fn = os.path.join(MNF_dir, f'{basename}_MNF.img')
 
         # if os.path.exists(MNF_fn):
@@ -81,64 +90,85 @@ if __name__ == '__main__':
                 time_list.append(meta['acquisition time'])
                 file_list.append(basename)
 
-                Preprocess.ASTER_EdgeExcision(input_raster_uri, opath['excision'])
+                if in_list('rad', steps):
+                    Preprocess.ASTER_EdgeExc_RadioCali_ConvInter(input_raster_uri, opath['rad'], out_interleave='bil',
+                                                                 data_ignore_value=0.0)
 
-                Preprocess.RadioCali_ConvInter(input_raster_uri, opath['rad'], out_interleave='bil',
-                                               data_ignore_value=0.0)
-                Preprocess.saveSelectedBands(opath['rad'], opath['VNSW_BIL'], bands=range(9),
-                                             out_interleave='bil')
-                Preprocess.saveSelectedBands(opath['rad'], opath['TIR_BIL'], bands=range(9, 14),
-                                             out_interleave='bil')
+                if in_list('VNSW_BIL', steps):
+                    Preprocess.extractSelectedBands(opath['rad'], opath['VNSW_BIL'], bands=range(9),
+                                                    out_interleave='bil')
+                if in_list('TIR_BIL', steps):
+                    Preprocess.extractSelectedBands(opath['rad'], opath['TIR_BIL'], bands=range(9, 14),
+                                                    out_interleave='bil')
 
-                Task.ASTER_FLAASH(opath['VNSW_BIL'], opath['fla'], opath['cloud'], opath['water'])
-                Task.ASTER_TIR_AtmosCor(opath['TIR_BIL'], opath['cor'])
+                if in_list('fla', steps):
+                    Task.ASTER_FLAASH(opath['VNSW_BIL'], opath['fla'], opath['cloud'], opath['water'])
+                if in_list('cor', steps):
+                    Task.ASTER_TIR_AtmosCor(opath['TIR_BIL'], opath['cor'])
+                if in_list('fla_mod', steps):
+                    Preprocess.modifyValue(opath['fla'], opath['fla_mod'], scale=10000, max_val=10000, min_val=0,
+                                           data_ignore_value=0, dtype=np.int16, time=meta['acquisition time'])
+                if in_list('cor_mod', steps):
+                    Preprocess.modifyValue(opath['cor'], opath['cor_mod'], scale=1, min_val=0,
+                                           data_ignore_value=0, dtype=np.float32, time=meta['acquisition time'])
 
-                Task.layerStack([opath['fla'], opath['cor']], opath['stack'])
+                if in_list('stack', steps):
+                    Task.layerStack([opath['fla_mod'], opath['cor_mod']], opath['stack'])
 
-                Task.removeEdge(opath['stack'], opath['rmEdge'], pixels=100)
-                # Task.removeEdge(fn, opath['rmEdge'], pixels=100)
-                Preprocess.ASTER_EdgeExcision(opath['rmEdge'], result_fn)
+                if in_list('excision', steps):
+                    Preprocess.ASTER_EdgeExcision(opath['stack'], output_fn)
 
-                # Add time attr to metadata (time lost in Task.removeEdge)
-                result_meta_fn = result_fn.replace(get_fn_info(result_fn).ext, 'hdr')
-                result_meta = e.open(result_meta_fn).metadata
-                result_meta['acquisition time'] = meta['acquisition time']
-                # pprint(result_meta)
-                e.write_envi_header(result_meta_fn, result_meta)
+                    # if in_list('rmEdge', steps):
+                    #     Task.removeEdge(opath['stack'], opath['rmEdge'], pixels=100)
+                    #     # Task.removeEdge(fn, opath['rmEdge'], pixels=100)
+                    #     Preprocess.ASTER_EdgeExcision(opath['rmEdge'], output_fn)
 
-                Task.MNF_Trans(result_fn, MNF_fn)
+                    # Add time attr to metadata (time lost in Task.removeEdge)
+                    output_meta_fn = output_fn.replace(get_fn_info(output_fn).ext, 'hdr')
+                    output_meta = e.open(output_meta_fn).metadata
+                    output_meta['acquisition time'] = meta['acquisition time']
+                    output_meta['sensor type'] = 'ASTER'
+                    # pprint(output_meta)
+                    e.write_envi_header(output_meta_fn, output_meta)
 
-                features = [
-                    'AlOH_minerals,advanced_argillic_alteration',
-                    'Clay,amphibole,laterite',
-                    'Gossan,alteration,host_rock(1)',
-                    'Decorellation',
-                    'Silica,carbonate',
-                    'Discrimination_for_mapping',
-                    'Discrimination_in_sulphide_rich_areas',
-                    'Silica,Fe2+',
-                    'Enhanced_structual_features']
+                if in_list('MNF', steps):
+                    Task.MNF_Trans(output_fn, MNF_fn)
 
-                for feature in features:
-                    BandMath.ASTER_combine(result_fn, MNF_fn, feature, combine_dir)
+                if in_list('combine', steps):
+                    features = [
+                        'AlOH_minerals,advanced_argillic_alteration',
+                        'Clay,amphibole,laterite',
+                        'Gossan,alteration,host_rock(1)',
+                        'Decorellation',
+                        'Silica,carbonate',
+                        'Discrimination_for_mapping',
+                        'Discrimination_in_sulphide_rich_areas',
+                        'Silica,Fe2+',
+                        'Enhanced_structual_features']
 
-                PCA_fn = os.path.join(MNF_dir, f'{basename}_PCA.img')
-                # alter_dir = os.path.join()
-                alters = ['Fe_PC3', 'Fe_PC4', 'Al-OH_sericite', 'Al-OH_kaolinite', 'propy']
-                PCA_bands = ['1234', '1346', '1345', '1348']
-                alter_path = create_opath(input_raster_uri, alter_dir, steps=alters)
-                PCA_path = create_opath(input_raster_uri, PCA_dir, steps=PCA_bands)
+                    for feature in features:
+                        BandMath.ASTER_combine(output_fn, MNF_fn, feature, combine_dir)
 
-                BandMath.find_alteration(result_fn, PCA_path['1234'], alter_path['Fe_PC3'], bands=[1, 2, 3, 4],
-                                         feature_PC=3)
-                BandMath.find_alteration(result_fn, PCA_path['1234'], alter_path['Fe_PC4'], bands=[1, 2, 3, 4],
-                                         feature_PC=4)
-                BandMath.find_alteration(result_fn, PCA_path['1346'], alter_path['Al-OH_sericite'], bands=[1, 3, 4, 6],
-                                         feature_PC=4, inverse=True)
-                BandMath.find_alteration(result_fn, PCA_path['1345'], alter_path['Al-OH_kaolinite'], bands=[1, 3, 4, 5],
-                                         feature_PC=4)
-                BandMath.find_alteration(result_fn, PCA_path['1348'], alter_path['propy'], bands=[1, 3, 4, 8],
-                                         feature_PC=3, inverse=True)
+                if in_list('alter', steps):
+                    PCA_fn = os.path.join(MNF_dir, f'{basename}_PCA.img')
+                    # alter_dir = os.path.join()
+                    alters = ['Fe_PC3', 'Fe_PC4', 'Al-OH_sericite', 'Al-OH_kaolinite', 'propy']
+                    PCA_bands = ['1234', '1346', '1345', '1348']
+                    alter_path = create_opath(input_raster_uri, alter_dir, steps=alters)
+                    PCA_path = create_opath(input_raster_uri, PCA_dir, steps=PCA_bands)
+
+                    BandMath.find_alteration(output_fn, PCA_path['1234'], alter_path['Fe_PC3'], bands=[1, 2, 3, 4],
+                                             feature_PC=3)
+                    BandMath.find_alteration(output_fn, PCA_path['1234'], alter_path['Fe_PC4'], bands=[1, 2, 3, 4],
+                                             feature_PC=4)
+                    BandMath.find_alteration(output_fn, PCA_path['1346'], alter_path['Al-OH_sericite'],
+                                             bands=[1, 3, 4, 6],
+                                             feature_PC=4, inverse=True)
+                    BandMath.find_alteration(output_fn, PCA_path['1345'], alter_path['Al-OH_kaolinite'],
+                                             bands=[1, 3, 4, 5],
+                                             feature_PC=4)
+                    BandMath.find_alteration(output_fn, PCA_path['1348'], alter_path['propy'], bands=[1, 3, 4, 8],
+                                             feature_PC=3, inverse=True)
 
                 end_time = time.time()
                 consume = format_time(end_time - start_time)
