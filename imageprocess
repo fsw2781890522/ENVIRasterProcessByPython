@@ -218,7 +218,7 @@ class Denoise:
 class Preprocess:
 
     @staticmethod
-    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=None, out_interleave=None, data_ignore_value=0.0,
+    def RadioCali_ConvInter(input_raster_uri, output_raster_uri, scale=0.1, out_interleave='bil', data_ignore_value=0.0,
                             save=True):
         '''
         :param scale: scale factor in radiometric calibration
@@ -228,11 +228,11 @@ class Preprocess:
         input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
         output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
 
-        if scale is None:
-            scale = 0.1
-
-        if out_interleave is None:
-            out_interleave = 'bil'
+        # if scale is None:
+        #     scale = 0.1
+        #
+        # if out_interleave is None:
+        #     out_interleave = 'bil'
 
         print('Applying radiometric calibration...')
 
@@ -254,10 +254,11 @@ class Preprocess:
                 #     for col in w[1]:
                 new_data[:, :, i] = scale * (
                         np.float32(gain[i]) * np.float32(data) + np.float32(offset[i]))
-                w = np.where(data == data_ignore_value)
-                coords = zip(w[0], w[1])
-                for coord in coords:
-                    new_data[coord] = data_ignore_value
+                # w = np.where(data == data_ignore_value)
+                # coords = zip(w[0], w[1])
+                # for coord in coords:
+                #     new_data[coord] = data_ignore_value
+                new_data[data == data_ignore_value] = data_ignore_value
 
             meta['data ignore value'] = data_ignore_value
             if save:
@@ -272,7 +273,7 @@ class Preprocess:
             print('Done')
 
     @staticmethod
-    def saveSelectedBands(input_raster_uri, output_raster_uri, bands=None, out_interleave=None, save=True):
+    def extractSelectedBands(input_raster_uri, output_raster_uri, bands=None, out_interleave=None, save=True):
 
         input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
         output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
@@ -314,7 +315,75 @@ class Preprocess:
             print('Done')
 
     @staticmethod
-    def ASTER_EdgeExcision(input_raster_uri, output_raster_uri, background=0, save=True):
+    def stackSameShapeLayers(input_raster_uris, output_raster_uri, data_ignore_value=0, out_interleave='bsq',
+                             time=None, save=True):
+
+        input_raster_uris = [input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr') for input_raster_uri in
+                            input_raster_uris]
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
+        print('Stacking same shape layers...')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            n_layers = len(input_raster_uris)
+            input_rasters = [e.open(input_raster_uri) for input_raster_uri in input_raster_uris]
+            metas = [input_raster.metadata for input_raster in input_rasters]
+            nl, ns, nb = input_rasters[0].shape
+            # total_nb = sum([input_raster.shape[-1] for input_raster in input_rasters])
+
+            print('Generating metadata...')
+            new_meta = dict()
+            for i in range(n_layers):
+                meta = metas[i]
+                for key in meta.keys():
+                    value = meta[key]
+                    if isinstance(value, list):
+                        new_meta[key] = list()
+                        new_meta[key] = (new_meta[key]).extend(value)
+                    else:
+                        if key not in new_meta:
+                            new_meta[key] = value
+
+            if time:
+                new_meta['acquisition time'] = time
+            new_meta['description'] = 'Layer Stack Result'
+
+            pprint(new_meta)
+
+            print('Stacking...')
+
+            new_data = np.stack([input_raster.load() for input_raster in input_rasters], axis=2)
+
+            print('Acquiring excision range...')
+
+            conditions = []
+
+            for band in tqdm(range(new_data.shape[-1]), ncols=100, colour='white'):
+                temp = np.reshape(new_data[:, :, band], (nl, ns))
+                condition = np.logical_or(temp == 0.0, np.isnan(temp))
+                conditions.append(condition)
+
+            conditions = np.any(conditions, axis=0)
+
+            print('Excising...')
+            for band in tqdm(range(nb), ncols=100, colour='white'):
+                temp = np.reshape(new_data[:, :, band], (nl, ns))
+                temp[conditions] = data_ignore_value
+                new_data[:, :, band] = temp
+
+            if save:
+                e.save_image(output_raster_uri, new_data, metadata=new_meta, dtype=np.float32, interleave=out_interleave)
+            else:
+                return new_data
+
+            print('Done')
+
+
+
+    @staticmethod
+    def ASTER_EdgeExcision(input_raster_uri, output_raster_uri, background=0.0, save=True):
 
         input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
         output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
@@ -330,27 +399,141 @@ class Preprocess:
             nl, ns, nb = input_raster.shape
 
             meta['sensor type'] = 'ASTER'
-            meta['data ignore value'] = 0.0
+            meta['data ignore value'] = background
 
             print('Acquiring excision range...')
-            w = set()
+
+            # w = set()
+            # for band in tqdm(range(nb), ncols=100, colour='white'):
+            #     temp = np.reshape(input_raster.read_band(band), (nl, ns))
+            #     w2 = np.where(np.logical_or(temp == 0.0, np.isnan(temp)))
+            #     w.update(zip(w2[0], w2[1]))
+            #
+            # print('Excising...')
+            # new_data = np.zeros((nl, ns, nb), dtype=np.float32)
+            # for band in tqdm(range(nb), ncols=100, colour='white'):
+            #     temp = np.reshape(input_raster.read_band(band), (nl, ns))
+            #     for coord in w:
+            #         temp[coord] = background
+            #     new_data[:, :, band] = temp
+
+            conditions = []
             for band in tqdm(range(nb), ncols=100, colour='white'):
                 temp = np.reshape(input_raster.read_band(band), (nl, ns))
-                w2 = np.where(np.logical_or(temp == 0.0, np.isnan(temp)))
-                w.update(zip(w2[0], w2[1]))
+                condition = np.logical_or(temp == 0.0, np.isnan(temp))
+                conditions.append(condition)
+
+            conditions = np.any(conditions, axis=0)
 
             print('Excising...')
             new_data = np.zeros((nl, ns, nb), dtype=np.float32)
             for band in tqdm(range(nb), ncols=100, colour='white'):
                 temp = np.reshape(input_raster.read_band(band), (nl, ns))
-                for coord in w:
-                    temp[coord] = background
+                temp[conditions] = background
                 new_data[:, :, band] = temp
 
             if save:
                 e.save_image(output_raster_uri, new_data, metadata=meta, dtype=np.float32, interleave=interleave)
             else:
                 return new_data
+
+            print('Done')
+
+    @staticmethod
+    def ASTER_EdgeExc_RadioCali_ConvInter(input_raster_uri, output_raster_uri, vnsw_scale=0.1, tir_scale=1,
+                                          out_interleave='bil',
+                                          data_ignore_value=0.0, save=True):
+        '''
+        :param scale: scale factor in radiometric calibration
+        :param out_interleave: interleave to save as. a string 'bsq', 'bil' or 'bip'
+        '''
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            input_raster = e.open(input_raster_uri)
+            # data = np.float32(input_raster.load())
+            meta = input_raster.metadata
+            interleave = meta['interleave']
+            gain = meta['data gain values']
+            offset = meta['data offset values']
+            nl, ns, nb = input_raster.shape
+
+            print('Acquiring excision range...')
+
+            conditions = []
+            for band in tqdm(range(nb), ncols=100, colour='white'):
+                temp = np.reshape(input_raster.read_band(band), (nl, ns))
+                condition = np.logical_or(temp == data_ignore_value, np.isnan(temp))
+                conditions.append(condition)
+
+            conditions = np.any(conditions, axis=0)
+
+            print('Applying radiometric calibration and edge excision...')
+
+            new_data = np.zeros((nl, ns, nb), dtype=np.float32)
+            for i in tqdm(range(nb), ncols=100, colour='white'):
+                temp = np.reshape(input_raster.read_band(i), (nl, ns))
+                if i <= 8:
+                    temp = vnsw_scale * (np.float32(gain[i]) * np.float32(temp) + np.float32(offset[i]))
+                else:
+                    temp = tir_scale * (np.float32(gain[i]) * np.float32(temp) + np.float32(offset[i]))
+                temp[conditions] = data_ignore_value
+                new_data[:, :, i] = temp
+
+            meta['data ignore value'] = data_ignore_value
+
+            if save:
+                meta.pop('data gain values')
+                meta.pop('data offset values')
+
+                print(f'Saving as {out_interleave}...')
+                e.save_image(output_raster_uri, new_data, metadata=meta, dtype=np.float32, interleave=out_interleave)
+            else:
+                return new_data
+
+            print('Done')
+
+    @staticmethod
+    def modifyValue(input_raster_uri, output_raster_uri, scale=1, max_val=None, min_val=None, data_ignore_value=0,
+                    dtype=np.int16, time=None, save=True):
+
+        input_raster_uri = input_raster_uri.replace(get_fn_info(input_raster_uri).ext, 'hdr')
+        output_raster_uri = output_raster_uri.replace(get_fn_info(output_raster_uri).ext, 'hdr')
+
+        print('Modifying image value...')
+
+        if os.path.exists(output_raster_uri):
+            print(output_raster_uri, 'already exists')
+        else:
+            input_raster = e.open(input_raster_uri)
+            meta = input_raster.metadata
+            interleave = meta['interleave']
+            nl, ns, nb = input_raster.shape
+
+            data = input_raster.read_bands(range(nb)) * scale
+            '''
+            multiplied a scale of 10000 in main because when loading a FLAASH result raster, 
+            the values are automatically divided by 10000 without user's will, 
+            don't know why
+            '''
+            if max_val:
+                data[data > max_val] = max_val
+            if min_val:
+                data[data < min_val] = min_val
+
+            meta['data ignore value'] = data_ignore_value
+            meta['sensor type'] = 'ASTER'
+            if time:
+                meta['acquisition time'] = time
+
+            if save:
+                e.save_image(output_raster_uri, data, metadata=meta, dtype=dtype, interleave=interleave)
+            else:
+                return data
 
             print('Done')
 
@@ -778,9 +961,9 @@ class BandMath:
 
             w1 = (feature < threshold1) | (feature > threshold1n)
             w2 = ((feature >= threshold1) & (feature < threshold2)) | (
-                        (feature >= threshold2n) & (feature < threshold1n))
+                    (feature >= threshold2n) & (feature < threshold1n))
             w3 = ((feature >= threshold2) & (feature < threshold3)) | (
-                        (feature >= threshold3n) & (feature < threshold2n))
+                    (feature >= threshold3n) & (feature < threshold2n))
             w4 = (feature >= threshold3) | (feature < threshold3n)
             feature[w1] = 0.0  # unclassified
             feature[w2] = 1.0  # level3
